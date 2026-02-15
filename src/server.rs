@@ -560,6 +560,510 @@ impl NostrIntelServer {
         serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
     }
 
+    // ==================== relay_discovery ====================
+
+    #[tool(
+        name = "relay_discovery",
+        description = "Discover relays used by a Nostr pubkey via NIP-65 relay list metadata. Costs 20 sats after free tier."
+    )]
+    async fn relay_discovery(
+        &self,
+        Parameters(params): Parameters<RelayDiscoveryParams>,
+    ) -> Result<String, String> {
+        // Payment gate
+        if let Some(ref hash) = params.payment_hash {
+            let gw = self.nwc_gateway.as_ref().ok_or("Payment system not configured")?;
+            let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
+            if !paid {
+                return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
+            }
+        } else {
+            let under_limit = self
+                .rate_limiter
+                .check_and_increment("stdio", self.config.free_tier.calls_per_day)
+                .await;
+            if !under_limit {
+                let gw = self.nwc_gateway.as_ref()
+                    .ok_or("Free tier exhausted and payment system not configured")?;
+                let amount = self.config.pricing.relay_discovery;
+                let inv = gw
+                    .create_invoice("relay_discovery", amount, "nostr-intel: relay_discovery", self.config.payment.invoice_expiry_seconds)
+                    .await.map_err(|e| e.to_string())?;
+                let resp = PaymentRequiredResponse {
+                    payment_required: true,
+                    tool_name: "relay_discovery".into(),
+                    amount_sats: amount,
+                    invoice: inv.invoice,
+                    payment_hash: inv.payment_hash,
+                    message: format!("Free tier exhausted. Payment required: {amount} sats. Pay the invoice, then retry with the payment_hash parameter."),
+                };
+                return serde_json::to_string_pretty(&resp).map_err(|e| e.to_string());
+            }
+        }
+
+        // Execute
+        let pubkey = NostrClient::parse_pubkey(params.pubkey.trim())
+            .map_err(|e| format!("Invalid pubkey: {e}"))?;
+
+        let relay_events = self.nostr_client.fetch_relay_list(&pubkey)
+            .await.map_err(|e| format!("Failed to fetch relay list: {e}"))?;
+
+        let mut write_relays = Vec::new();
+        let mut read_relays = Vec::new();
+
+        if let Some(event) = relay_events.first() {
+            for tag in event.tags.iter() {
+                let tag_vec: Vec<String> = tag.as_slice().iter().map(|s| s.to_string()).collect();
+                if tag_vec.first().map(|s| s.as_str()) == Some("r") {
+                    if let Some(url) = tag_vec.get(1) {
+                        match tag_vec.get(2).map(|s| s.as_str()) {
+                            Some("read") => read_relays.push(url.clone()),
+                            Some("write") => write_relays.push(url.clone()),
+                            _ => {
+                                // No marker means both read and write
+                                read_relays.push(url.clone());
+                                write_relays.push(url.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Build recommended relays from the union
+        let mut recommended: Vec<String> = write_relays.clone();
+        for r in &read_relays {
+            if !recommended.contains(r) {
+                recommended.push(r.clone());
+            }
+        }
+
+        let response = RelayDiscoveryResponse {
+            write_relays,
+            read_relays,
+            last_event_seen: relay_events.first().map(|e| LastEventSeen {
+                relay: "relay_list_event".into(),
+                timestamp: e.created_at.as_secs(),
+            }),
+            recommended_relays: recommended,
+        };
+
+        serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
+    }
+
+    // ==================== trending_notes ====================
+
+    #[tool(
+        name = "trending_notes",
+        description = "Find trending Nostr notes by reactions, reposts, and zaps. Costs 20 sats after free tier."
+    )]
+    async fn trending_notes(
+        &self,
+        Parameters(params): Parameters<TrendingNotesParams>,
+    ) -> Result<String, String> {
+        // Payment gate
+        if let Some(ref hash) = params.payment_hash {
+            let gw = self.nwc_gateway.as_ref().ok_or("Payment system not configured")?;
+            let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
+            if !paid {
+                return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
+            }
+        } else {
+            let under_limit = self
+                .rate_limiter
+                .check_and_increment("stdio", self.config.free_tier.calls_per_day)
+                .await;
+            if !under_limit {
+                let gw = self.nwc_gateway.as_ref()
+                    .ok_or("Free tier exhausted and payment system not configured")?;
+                let amount = self.config.pricing.trending_notes;
+                let inv = gw
+                    .create_invoice("trending_notes", amount, "nostr-intel: trending_notes", self.config.payment.invoice_expiry_seconds)
+                    .await.map_err(|e| e.to_string())?;
+                let resp = PaymentRequiredResponse {
+                    payment_required: true,
+                    tool_name: "trending_notes".into(),
+                    amount_sats: amount,
+                    invoice: inv.invoice,
+                    payment_hash: inv.payment_hash,
+                    message: format!("Free tier exhausted. Payment required: {amount} sats. Pay the invoice, then retry with the payment_hash parameter."),
+                };
+                return serde_json::to_string_pretty(&resp).map_err(|e| e.to_string());
+            }
+        }
+
+        // Execute
+        let timeframe_str = params.timeframe.as_deref().unwrap_or("24h");
+        let since_secs = parse_timeframe(timeframe_str)
+            .map_err(|e| format!("Invalid timeframe: {e}"))?;
+        let now = chrono::Utc::now().timestamp() as u64;
+        let since = Timestamp::from(now.saturating_sub(since_secs));
+
+        let limit = params.limit.unwrap_or(20).min(50) as usize;
+
+        // Fetch recent notes
+        let notes = self.nostr_client.fetch_recent_notes(since, 200)
+            .await.map_err(|e| format!("Failed to fetch notes: {e}"))?;
+
+        if notes.is_empty() {
+            let response = TrendingNotesResponse {
+                notes: vec![],
+                timeframe: timeframe_str.to_string(),
+                count: 0,
+            };
+            return serde_json::to_string_pretty(&response).map_err(|e| e.to_string());
+        }
+
+        let note_ids: Vec<EventId> = notes.iter().map(|e| e.id).collect();
+
+        // Fetch reactions, reposts, and zap receipts in parallel
+        let (reactions, reposts) = tokio::join!(
+            self.nostr_client.fetch_reactions(&note_ids, Some(since)),
+            self.nostr_client.fetch_reposts(&note_ids, Some(since)),
+        );
+        let reactions = reactions.map_err(|e| format!("Failed to fetch reactions: {e}"))?;
+        let reposts = reposts.map_err(|e| format!("Failed to fetch reposts: {e}"))?;
+
+        // Count reactions per note
+        let mut reaction_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for r in &reactions {
+            for tag in r.tags.iter() {
+                let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+                if tag_vec.first() == Some(&"e") {
+                    if let Some(id) = tag_vec.get(1) {
+                        *reaction_counts.entry(id.to_string()).or_default() += 1;
+                    }
+                }
+            }
+        }
+
+        // Count reposts per note
+        let mut repost_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for r in &reposts {
+            for tag in r.tags.iter() {
+                let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+                if tag_vec.first() == Some(&"e") {
+                    if let Some(id) = tag_vec.get(1) {
+                        *repost_counts.entry(id.to_string()).or_default() += 1;
+                    }
+                }
+            }
+        }
+
+        // Score and sort notes
+        let mut scored_notes: Vec<(u64, &Event)> = notes.iter().map(|note| {
+            let id_hex = note.id.to_hex();
+            let r_count = reaction_counts.get(&id_hex).copied().unwrap_or(0);
+            let rp_count = repost_counts.get(&id_hex).copied().unwrap_or(0);
+            // Score: reactions * 1 + reposts * 3
+            let score = r_count as u64 + rp_count as u64 * 3;
+            (score, note)
+        }).collect();
+
+        scored_notes.sort_by(|a, b| b.0.cmp(&a.0));
+        scored_notes.truncate(limit);
+
+        let trending: Vec<TrendingNote> = scored_notes
+            .into_iter()
+            .map(|(score, note)| {
+                let id_hex = note.id.to_hex();
+                let content_preview = truncate_content(&note.content, 280);
+                TrendingNote {
+                    id: id_hex.clone(),
+                    author_pubkey: note.pubkey.to_hex(),
+                    author_name: None,
+                    content_preview,
+                    reactions: reaction_counts.get(&id_hex).copied().unwrap_or(0),
+                    reposts: repost_counts.get(&id_hex).copied().unwrap_or(0),
+                    zap_total_sats: 0,
+                    score,
+                    created_at: note.created_at.as_secs(),
+                }
+            })
+            .collect();
+
+        let count = trending.len() as u32;
+        let response = TrendingNotesResponse {
+            notes: trending,
+            timeframe: timeframe_str.to_string(),
+            count,
+        };
+
+        serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
+    }
+
+    // ==================== get_follower_graph ====================
+
+    #[tool(
+        name = "get_follower_graph",
+        description = "Get the follower graph for a Nostr pubkey: following, followers, and mutual follows. Costs 50 sats (depth 1) or 100 sats (depth 2) after free tier."
+    )]
+    async fn get_follower_graph(
+        &self,
+        Parameters(params): Parameters<GetFollowerGraphParams>,
+    ) -> Result<String, String> {
+        let depth = params.depth.unwrap_or(1).clamp(1, 2);
+
+        // Payment gate
+        if let Some(ref hash) = params.payment_hash {
+            let gw = self.nwc_gateway.as_ref().ok_or("Payment system not configured")?;
+            let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
+            if !paid {
+                return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
+            }
+        } else {
+            let under_limit = self
+                .rate_limiter
+                .check_and_increment("stdio", self.config.free_tier.calls_per_day)
+                .await;
+            if !under_limit {
+                let gw = self.nwc_gateway.as_ref()
+                    .ok_or("Free tier exhausted and payment system not configured")?;
+                let amount = self.calculate_follower_graph_price(depth);
+                let inv = gw
+                    .create_invoice("get_follower_graph", amount, "nostr-intel: get_follower_graph", self.config.payment.invoice_expiry_seconds)
+                    .await.map_err(|e| e.to_string())?;
+                let resp = PaymentRequiredResponse {
+                    payment_required: true,
+                    tool_name: "get_follower_graph".into(),
+                    amount_sats: amount,
+                    invoice: inv.invoice,
+                    payment_hash: inv.payment_hash,
+                    message: format!("Free tier exhausted. Payment required: {amount} sats. Pay the invoice, then retry with the payment_hash parameter."),
+                };
+                return serde_json::to_string_pretty(&resp).map_err(|e| e.to_string());
+            }
+        }
+
+        // Execute
+        let pubkey = NostrClient::parse_pubkey(params.pubkey.trim())
+            .map_err(|e| format!("Invalid pubkey: {e}"))?;
+        let pubkey_hex = pubkey.to_hex();
+
+        // Fetch the target's contact list (who they follow)
+        let contact_list = self.nostr_client.fetch_contact_list(&pubkey)
+            .await.map_err(|e| format!("Failed to fetch contact list: {e}"))?;
+
+        let mut following: Vec<PubkeySummary> = Vec::new();
+        let mut following_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        if let Some(ref cl) = contact_list {
+            for tag in cl.tags.iter() {
+                let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+                if tag_vec.first() == Some(&"p") {
+                    if let Some(pk) = tag_vec.get(1) {
+                        following_set.insert(pk.to_string());
+                        following.push(PubkeySummary {
+                            pubkey: pk.to_string(),
+                            name: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Try to resolve names from cache for following
+        for f in &mut following {
+            if let Ok(Some(cached)) = self.cache.get_profile(&f.pubkey).await {
+                f.name = cached.name.or(cached.display_name);
+            }
+        }
+
+        let following_count = following.len() as u32;
+
+        // Fetch followers: kind:3 events that have our target in their p tags
+        // This is expensive — we search for contact lists referencing this pubkey
+        let follower_filter = Filter::new()
+            .kind(Kind::ContactList)
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey_hex.clone())
+            .limit(100);
+
+        let follower_events = self.nostr_client.client()
+            .fetch_events(follower_filter, std::time::Duration::from_secs(15))
+            .await
+            .map_err(|e| format!("Failed to fetch followers: {e}"))?;
+
+        let mut followers: Vec<PubkeySummary> = Vec::new();
+        let mut follower_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for event in follower_events.iter() {
+            let pk_hex = event.pubkey.to_hex();
+            if follower_set.insert(pk_hex.clone()) {
+                let mut summary = PubkeySummary {
+                    pubkey: pk_hex.clone(),
+                    name: None,
+                };
+                if let Ok(Some(cached)) = self.cache.get_profile(&pk_hex).await {
+                    summary.name = cached.name.or(cached.display_name);
+                }
+                followers.push(summary);
+            }
+        }
+
+        let followers_count = followers.len() as u32;
+
+        // Compute mutual follows
+        let mutual_follows: Vec<PubkeySummary> = followers.iter()
+            .filter(|f| following_set.contains(&f.pubkey))
+            .cloned()
+            .collect();
+
+        let response = GetFollowerGraphResponse {
+            pubkey: pubkey_hex,
+            following_count,
+            following,
+            followers_count,
+            followers_sample: followers,
+            mutual_follows,
+        };
+
+        serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
+    }
+
+    // ==================== zap_analytics ====================
+
+    #[tool(
+        name = "zap_analytics",
+        description = "Analyze zap (Lightning tip) activity for a Nostr pubkey. Costs 50 sats after free tier."
+    )]
+    async fn zap_analytics(
+        &self,
+        Parameters(params): Parameters<ZapAnalyticsParams>,
+    ) -> Result<String, String> {
+        // Payment gate
+        if let Some(ref hash) = params.payment_hash {
+            let gw = self.nwc_gateway.as_ref().ok_or("Payment system not configured")?;
+            let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
+            if !paid {
+                return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
+            }
+        } else {
+            let under_limit = self
+                .rate_limiter
+                .check_and_increment("stdio", self.config.free_tier.calls_per_day)
+                .await;
+            if !under_limit {
+                let gw = self.nwc_gateway.as_ref()
+                    .ok_or("Free tier exhausted and payment system not configured")?;
+                let amount = self.config.pricing.zap_analytics;
+                let inv = gw
+                    .create_invoice("zap_analytics", amount, "nostr-intel: zap_analytics", self.config.payment.invoice_expiry_seconds)
+                    .await.map_err(|e| e.to_string())?;
+                let resp = PaymentRequiredResponse {
+                    payment_required: true,
+                    tool_name: "zap_analytics".into(),
+                    amount_sats: amount,
+                    invoice: inv.invoice,
+                    payment_hash: inv.payment_hash,
+                    message: format!("Free tier exhausted. Payment required: {amount} sats. Pay the invoice, then retry with the payment_hash parameter."),
+                };
+                return serde_json::to_string_pretty(&resp).map_err(|e| e.to_string());
+            }
+        }
+
+        // Execute
+        let pubkey = NostrClient::parse_pubkey(params.pubkey.trim())
+            .map_err(|e| format!("Invalid pubkey: {e}"))?;
+
+        let timeframe_str = params.timeframe.as_deref().unwrap_or("30d");
+        let since_secs = parse_timeframe(timeframe_str)
+            .map_err(|e| format!("Invalid timeframe: {e}"))?;
+        let now = chrono::Utc::now().timestamp() as u64;
+        let since = Timestamp::from(now.saturating_sub(since_secs));
+
+        let zap_receipts = self.nostr_client.fetch_zap_receipts(&pubkey, Some(since))
+            .await.map_err(|e| format!("Failed to fetch zap receipts: {e}"))?;
+
+        let mut total_sats: u64 = 0;
+        let mut zapper_totals: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        let mut note_totals: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        let mut daily_totals: std::collections::BTreeMap<String, (u32, u64)> = std::collections::BTreeMap::new();
+
+        for event in &zap_receipts {
+            // Parse amount from the zap request description tag or bolt11
+            let amount_sats = extract_zap_amount(event);
+            total_sats += amount_sats;
+
+            // Extract zapper pubkey from uppercase P tag (sender's pubkey in zap request)
+            // or from the embedded zap request in the description tag
+            let zapper_pk = extract_zapper_pubkey(event);
+            if let Some(ref pk) = zapper_pk {
+                *zapper_totals.entry(pk.clone()).or_default() += amount_sats;
+            }
+
+            // Extract zapped note from e tag
+            for tag in event.tags.iter() {
+                let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+                if tag_vec.first() == Some(&"e") {
+                    if let Some(note_id) = tag_vec.get(1) {
+                        *note_totals.entry(note_id.to_string()).or_default() += amount_sats;
+                    }
+                }
+            }
+
+            // Group by date
+            let date = chrono::DateTime::from_timestamp(event.created_at.as_secs() as i64, 0)
+                .map(|dt| dt.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            let entry = daily_totals.entry(date).or_insert((0, 0));
+            entry.0 += 1;
+            entry.1 += amount_sats;
+        }
+
+        let total_zaps_count = zap_receipts.len() as u32;
+        let avg_zap_sats = if total_zaps_count > 0 {
+            total_sats / total_zaps_count as u64
+        } else {
+            0
+        };
+
+        // Top zappers
+        let mut zapper_vec: Vec<(String, u64)> = zapper_totals.into_iter().collect();
+        zapper_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        let mut top_zappers: Vec<ZapperSummary> = Vec::new();
+        for (pk, sats) in zapper_vec.into_iter().take(10) {
+            let name = if let Ok(Some(cached)) = self.cache.get_profile(&pk).await {
+                cached.name.or(cached.display_name)
+            } else {
+                None
+            };
+            top_zappers.push(ZapperSummary {
+                pubkey: pk,
+                name,
+                total_sats: sats,
+            });
+        }
+
+        // Top zapped notes
+        let mut note_vec: Vec<(String, u64)> = note_totals.into_iter().collect();
+        note_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        let top_zapped_notes: Vec<ZappedNote> = note_vec.into_iter().take(10)
+            .map(|(note_id, sats)| ZappedNote {
+                note_id,
+                content_preview: String::new(),
+                total_sats: sats,
+            })
+            .collect();
+
+        // Zaps over time
+        let zaps_over_time: Vec<ZapPeriod> = daily_totals.into_iter()
+            .map(|(date, (count, sats))| ZapPeriod { date, count, sats })
+            .collect();
+
+        let response = ZapAnalyticsResponse {
+            total_received_sats: total_sats,
+            total_zaps_count,
+            avg_zap_sats,
+            top_zappers,
+            top_zapped_notes,
+            zaps_over_time,
+        };
+
+        serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
+    }
+
+    // ==================== pricing helpers ====================
+
     fn calculate_price(&self, params: &SearchEventsParams) -> u64 {
         let mut price = self.config.pricing.search_events_base;
         if let Some(limit) = params.limit {
@@ -572,4 +1076,151 @@ impl NostrIntelServer {
         }
         price
     }
+
+    fn calculate_follower_graph_price(&self, depth: u8) -> u64 {
+        if depth >= 2 {
+            self.config.pricing.get_follower_graph * 2
+        } else {
+            self.config.pricing.get_follower_graph
+        }
+    }
+}
+
+// ==================== helper functions ====================
+
+/// Parse timeframe strings like "1h", "24h", "7d", "30d", "90d", "1y" into seconds
+fn parse_timeframe(tf: &str) -> Result<u64, String> {
+    let tf = tf.trim().to_lowercase();
+    if let Some(hours) = tf.strip_suffix('h') {
+        let h: u64 = hours.parse().map_err(|_| format!("Invalid hours: {hours}"))?;
+        Ok(h * 3600)
+    } else if let Some(days) = tf.strip_suffix('d') {
+        let d: u64 = days.parse().map_err(|_| format!("Invalid days: {days}"))?;
+        Ok(d * 86400)
+    } else if let Some(years) = tf.strip_suffix('y') {
+        let y: u64 = years.parse().map_err(|_| format!("Invalid years: {years}"))?;
+        Ok(y * 365 * 86400)
+    } else {
+        Err(format!("Unknown timeframe format: {tf}. Use '1h', '24h', '7d', '30d', etc."))
+    }
+}
+
+/// Truncate content to a max length, appending "..." if truncated
+fn truncate_content(content: &str, max_len: usize) -> String {
+    if content.len() > max_len {
+        format!("{}...", &content[..max_len])
+    } else {
+        content.to_string()
+    }
+}
+
+/// Extract zap amount in sats from a kind:9735 zap receipt event.
+/// Tries the `bolt11` tag first, then the embedded zap request `description` tag.
+fn extract_zap_amount(event: &Event) -> u64 {
+    // Try bolt11 tag
+    for tag in event.tags.iter() {
+        let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+        if tag_vec.first() == Some(&"bolt11") {
+            if let Some(bolt11) = tag_vec.get(1) {
+                if let Some(amount) = parse_bolt11_amount(bolt11) {
+                    return amount;
+                }
+            }
+        }
+    }
+
+    // Try description tag (embedded zap request with amount)
+    for tag in event.tags.iter() {
+        let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+        if tag_vec.first() == Some(&"description") {
+            if let Some(desc) = tag_vec.get(1) {
+                if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(desc) {
+                    // Look for amount tag in the zap request
+                    if let Some(tags) = zap_request["tags"].as_array() {
+                        for t in tags {
+                            if let Some(arr) = t.as_array() {
+                                if arr.first().and_then(|v| v.as_str()) == Some("amount") {
+                                    if let Some(msats_str) = arr.get(1).and_then(|v| v.as_str()) {
+                                        if let Ok(msats) = msats_str.parse::<u64>() {
+                                            return msats / 1000;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    0
+}
+
+/// Parse amount from a bolt11 invoice string.
+/// Bolt11 amounts: number followed by multiplier (m=milli, u=micro, n=nano, p=pico)
+fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
+    let lower = bolt11.to_lowercase();
+    // Find "lnbc"/"lntb"/"lnbcrt" prefix and extract the amount portion
+    let after_prefix = if let Some(rest) = lower.strip_prefix("lnbcrt") {
+        rest
+    } else if let Some(rest) = lower.strip_prefix("lnbc") {
+        rest
+    } else if let Some(rest) = lower.strip_prefix("lntb") {
+        rest
+    } else {
+        return None;
+    };
+
+    // Amount is digits + optional multiplier before the first '1' separator
+    let sep_pos = after_prefix.find('1')?;
+    let amount_str = &after_prefix[..sep_pos];
+
+    if amount_str.is_empty() {
+        return None; // No amount specified
+    }
+
+    // Check for multiplier suffix
+    if let Some(n) = amount_str.strip_suffix('m') {
+        let num: u64 = n.parse().ok()?;
+        Some(num * 100_000) // milli-BTC to sats
+    } else if let Some(n) = amount_str.strip_suffix('u') {
+        let num: u64 = n.parse().ok()?;
+        Some(num * 100) // micro-BTC to sats
+    } else if let Some(n) = amount_str.strip_suffix('n') {
+        let num: u64 = n.parse().ok()?;
+        Some(num / 10) // nano-BTC to sats (0.1 sat each)
+    } else if let Some(n) = amount_str.strip_suffix('p') {
+        let num: u64 = n.parse().ok()?;
+        Some(num / 100) // pico-BTC to sats (0.01 sat each)
+    } else {
+        let num: u64 = amount_str.parse().ok()?;
+        Some(num * 100_000_000) // plain BTC to sats
+    }
+}
+
+/// Extract the zapper's pubkey from a zap receipt event.
+/// Looks for uppercase 'P' tag or parses from embedded zap request description.
+fn extract_zapper_pubkey(event: &Event) -> Option<String> {
+    // Check for uppercase P tag (zapper's pubkey)
+    for tag in event.tags.iter() {
+        let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+        if tag_vec.first() == Some(&"P") {
+            return tag_vec.get(1).map(|s| s.to_string());
+        }
+    }
+
+    // Try description tag (embedded zap request)
+    for tag in event.tags.iter() {
+        let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+        if tag_vec.first() == Some(&"description") {
+            if let Some(desc) = tag_vec.get(1) {
+                if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(desc) {
+                    return zap_request["pubkey"].as_str().map(String::from);
+                }
+            }
+        }
+    }
+
+    None
 }

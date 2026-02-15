@@ -22,6 +22,10 @@ calls_per_day = 10
 
 [pricing]
 search_events_base = 10  # sats
+relay_discovery = 20
+trending_notes = 20
+get_follower_graph = 50
+zap_analytics = 50
 
 [payment]
 nwc_url = ""  # override with NWC_URL env var

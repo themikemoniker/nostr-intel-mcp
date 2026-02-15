@@ -37,6 +37,10 @@ pub struct FreeTierConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PricingConfig {
     pub search_events_base: u64,
+    pub relay_discovery: u64,
+    pub trending_notes: u64,
+    pub get_follower_graph: u64,
+    pub zap_analytics: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

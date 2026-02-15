@@ -6,6 +6,10 @@ pub struct NostrClient {
 }
 
 impl NostrClient {
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     pub async fn new(relay_urls: Vec<String>) -> anyhow::Result<Self> {
         let client = Client::default();
 
@@ -67,6 +71,113 @@ impl NostrClient {
         let timeout = Duration::from_secs(15);
         let events = self.client.fetch_events(filter, timeout).await?;
 
+        Ok(events.into_iter().collect())
+    }
+
+    /// Fetch kind:10002 (NIP-65 relay list metadata) for a pubkey
+    pub async fn fetch_relay_list(&self, pubkey: &PublicKey) -> anyhow::Result<Vec<Event>> {
+        let filter = Filter::new()
+            .kind(Kind::RelayList)
+            .author(*pubkey)
+            .limit(1);
+
+        let timeout = Duration::from_secs(10);
+        let events = self.client.fetch_events(filter, timeout).await?;
+        Ok(events.into_iter().collect())
+    }
+
+    /// Fetch kind:3 (contact list) for a pubkey
+    pub async fn fetch_contact_list(&self, pubkey: &PublicKey) -> anyhow::Result<Option<Event>> {
+        let filter = Filter::new()
+            .kind(Kind::ContactList)
+            .author(*pubkey)
+            .limit(1);
+
+        let timeout = Duration::from_secs(10);
+        let events = self.client.fetch_events(filter, timeout).await?;
+        Ok(events.into_iter().next())
+    }
+
+    /// Fetch events by their IDs
+    pub async fn fetch_events_by_ids(&self, ids: Vec<EventId>) -> anyhow::Result<Vec<Event>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let filter = Filter::new().ids(ids);
+        let timeout = Duration::from_secs(10);
+        let events = self.client.fetch_events(filter, timeout).await?;
+        Ok(events.into_iter().collect())
+    }
+
+    /// Fetch kind:7 reactions referencing the given event IDs
+    pub async fn fetch_reactions(
+        &self,
+        event_ids: &[EventId],
+        since: Option<Timestamp>,
+    ) -> anyhow::Result<Vec<Event>> {
+        if event_ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let mut filter = Filter::new()
+            .kind(Kind::Reaction)
+            .events(event_ids.to_vec());
+        if let Some(since) = since {
+            filter = filter.since(since);
+        }
+        let timeout = Duration::from_secs(15);
+        let events = self.client.fetch_events(filter, timeout).await?;
+        Ok(events.into_iter().collect())
+    }
+
+    /// Fetch kind:6 reposts referencing the given event IDs
+    pub async fn fetch_reposts(
+        &self,
+        event_ids: &[EventId],
+        since: Option<Timestamp>,
+    ) -> anyhow::Result<Vec<Event>> {
+        if event_ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let mut filter = Filter::new()
+            .kind(Kind::Repost)
+            .events(event_ids.to_vec());
+        if let Some(since) = since {
+            filter = filter.since(since);
+        }
+        let timeout = Duration::from_secs(15);
+        let events = self.client.fetch_events(filter, timeout).await?;
+        Ok(events.into_iter().collect())
+    }
+
+    /// Fetch kind:9735 zap receipts where the `p` tag matches the pubkey
+    pub async fn fetch_zap_receipts(
+        &self,
+        pubkey: &PublicKey,
+        since: Option<Timestamp>,
+    ) -> anyhow::Result<Vec<Event>> {
+        let mut filter = Filter::new()
+            .kind(Kind::ZapReceipt)
+            .pubkey(*pubkey);
+        if let Some(since) = since {
+            filter = filter.since(since);
+        }
+        let timeout = Duration::from_secs(15);
+        let events = self.client.fetch_events(filter, timeout).await?;
+        Ok(events.into_iter().collect())
+    }
+
+    /// Fetch kind:1 text notes from the given timeframe
+    pub async fn fetch_recent_notes(
+        &self,
+        since: Timestamp,
+        limit: usize,
+    ) -> anyhow::Result<Vec<Event>> {
+        let filter = Filter::new()
+            .kind(Kind::TextNote)
+            .since(since)
+            .limit(limit);
+        let timeout = Duration::from_secs(15);
+        let events = self.client.fetch_events(filter, timeout).await?;
         Ok(events.into_iter().collect())
     }
 
