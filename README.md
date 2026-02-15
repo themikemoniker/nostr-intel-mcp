@@ -197,6 +197,34 @@ fly secrets set NWC_URL="nostr+walletconnect://..." L402_SECRET="your-hex-secret
 fly deploy
 ```
 
+## Roadmap
+
+### Done
+
+- [x] **Free tools** — `decode_nostr_uri`, `resolve_nip05`, `get_profile`, `check_relay`, `search_profiles`
+- [x] **Paid tools** — `search_events`, `relay_discovery`, `trending_notes`, `get_follower_graph`, `zap_analytics`
+- [x] **NWC payment gate** — Lightning invoice generation + verification via Nostr Wallet Connect
+- [x] **Free tier rate limiter** — 10 calls/day per session, SQLite-backed
+- [x] **L402 authentication** — HMAC-based token minting and verification for HTTP transport
+- [x] **Dual transport** — stdio (JSON-RPC) and HTTP (Streamable HTTP via axum)
+- [x] **SQLite cache** — profiles and relay info with configurable TTL
+- [x] **Primal search integration** — fuzzy profile search by name via Primal's cache API
+- [x] **Fly.io deployment** — Docker multi-stage build, live at `nostr-intel-mcp.fly.dev`
+- [x] **CI pipeline** — GitHub Actions: fmt, check, clippy, test, Docker build
+- [x] **Unit tests** — decode_nostr_uri parsing, rate limiter logic, L402 token lifecycle
+
+### Up Next
+
+- [ ] **x402 payments** — real USDC-on-Base payment verification (currently a stub)
+- [ ] **Profile enrichment** — resolve names for pubkeys in `trending_notes`, `search_events` responses
+- [ ] **WebSocket relay probing** — actual WS connect in `check_relay` alongside NIP-11 HTTP check
+- [ ] **Background cache cleanup** — periodic task to evict expired profiles, relay info, and stale rate limit rows
+- [ ] **Relay health monitoring** — scheduled checks across default relay pool with uptime tracking
+- [ ] **HTTP auth / API keys** — optional bearer token auth for HTTP transport sessions
+- [ ] **NIP-50 search improvements** — broader relay support and fallback strategies for full-text search
+- [ ] **Streaming responses** — chunked delivery for large result sets (follower graphs, event searches)
+- [ ] **Per-tool analytics** — track usage stats per tool for observability and pricing tuning
+
 ## Development
 
 ```bash
