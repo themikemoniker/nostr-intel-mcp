@@ -14,6 +14,7 @@ RUN cargo build --release 2>/dev/null || true
 RUN rm -rf src
 
 # Build the real project
+COPY static/ static/
 COPY src/ src/
 RUN touch src/main.rs && cargo build --release
 
