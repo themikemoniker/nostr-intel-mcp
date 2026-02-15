@@ -1,5 +1,8 @@
 # nostr-intel-mcp
 
+[![CI](https://github.com/themikemoniker/nostr-intel-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/themikemoniker/nostr-intel-mcp/actions/workflows/ci.yml)
+[![Fly Deploy](https://github.com/themikemoniker/nostr-intel-mcp/actions/workflows/fly-deploy.yml/badge.svg)](https://github.com/themikemoniker/nostr-intel-mcp/actions/workflows/fly-deploy.yml)
+
 A Rust MCP (Model Context Protocol) server that provides AI agents with structured intelligence about the Nostr social network. Free tier for basic lookups, paid tier via Bitcoin Lightning payments.
 
 - First Rust MCP server that accepts Bitcoin payments

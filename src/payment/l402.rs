@@ -6,6 +6,7 @@ use sha2::Sha256;
 type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)]
 pub enum L402Error {
     #[error("Invalid secret: must be at least 32 bytes hex-encoded")]
     InvalidSecret,
@@ -66,6 +67,7 @@ impl L402Manager {
     }
 
     /// Verify a base64-encoded L402 token. Returns the token data if valid.
+    #[allow(dead_code)]
     pub fn verify_token(&self, token_base64: &str) -> Result<L402TokenData, L402Error> {
         let json_bytes = BASE64_STANDARD
             .decode(token_base64)
@@ -90,6 +92,7 @@ impl L402Manager {
     }
 
     /// Verify that a preimage hashes to the given payment_hash (both hex-encoded).
+    #[allow(dead_code)]
     pub fn verify_preimage(payment_hash_hex: &str, preimage_hex: &str) -> bool {
         let Ok(preimage) = hex::decode(preimage_hex) else {
             return false;
@@ -116,6 +119,7 @@ impl L402Manager {
     }
 
     /// Parse an Authorization header: "L402 <token>:<preimage>"
+    #[allow(dead_code)]
     pub fn parse_authorization(header: &str) -> Result<(String, String), L402Error> {
         let rest = header
             .strip_prefix("L402 ")

@@ -12,6 +12,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct ServerConfig {
     pub name: String,
     pub version: String,
@@ -64,6 +65,7 @@ pub struct PaymentConfig {
     #[serde(default)]
     pub enable_l402: bool,
     #[serde(default)]
+    #[allow(dead_code)]
     pub enable_x402: bool,
 }
 

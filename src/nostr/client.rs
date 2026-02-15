@@ -93,6 +93,7 @@ impl NostrClient {
     }
 
     /// Fetch events by their IDs
+    #[allow(dead_code)]
     pub async fn fetch_events_by_ids(&self, ids: Vec<EventId>) -> anyhow::Result<Vec<Event>> {
         if ids.is_empty() {
             return Ok(vec![]);
