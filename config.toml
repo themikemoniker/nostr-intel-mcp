@@ -1,6 +1,8 @@
 [server]
 name = "nostr-intel-mcp"
 version = "0.1.0"
+transport = "stdio"
+http_port = 3000
 
 [relays]
 default = [
@@ -30,3 +32,6 @@ zap_analytics = 50
 [payment]
 nwc_url = ""  # override with NWC_URL env var
 invoice_expiry_seconds = 600
+l402_secret = ""  # override with L402_SECRET env var (hex-encoded, min 32 bytes)
+enable_l402 = false
+enable_x402 = false

@@ -1086,6 +1086,42 @@ impl NostrIntelServer {
     }
 }
 
+// ==================== SharedState for HTTP transport ====================
+
+/// Shared state that can be cloned across sessions (all fields are Arc-wrapped).
+pub struct SharedState {
+    pub config: Arc<Config>,
+    pub nostr_client: Arc<NostrClient>,
+    pub cache: Arc<Cache>,
+    pub nwc_gateway: Option<Arc<NwcGateway>>,
+    pub rate_limiter: Arc<FreeTierLimiter>,
+}
+
+impl NostrIntelServer {
+    /// Extract the shared state from an existing server instance.
+    pub fn shared_state(&self) -> SharedState {
+        SharedState {
+            config: Arc::clone(&self.config),
+            nostr_client: Arc::clone(&self.nostr_client),
+            cache: Arc::clone(&self.cache),
+            nwc_gateway: self.nwc_gateway.clone(),
+            rate_limiter: Arc::clone(&self.rate_limiter),
+        }
+    }
+
+    /// Create a new server instance from shared state (for per-session HTTP factory).
+    pub fn from_shared(state: &SharedState) -> Self {
+        Self {
+            config: Arc::clone(&state.config),
+            nostr_client: Arc::clone(&state.nostr_client),
+            cache: Arc::clone(&state.cache),
+            nwc_gateway: state.nwc_gateway.clone(),
+            rate_limiter: Arc::clone(&state.rate_limiter),
+            tool_router: Self::tool_router(),
+        }
+    }
+}
+
 // ==================== helper functions ====================
 
 /// Parse timeframe strings like "1h", "24h", "7d", "30d", "90d", "1y" into seconds

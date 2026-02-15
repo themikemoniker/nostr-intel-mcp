@@ -15,6 +15,18 @@ pub struct Config {
 pub struct ServerConfig {
     pub name: String,
     pub version: String,
+    #[serde(default = "default_transport")]
+    pub transport: String,
+    #[serde(default = "default_http_port")]
+    pub http_port: u16,
+}
+
+fn default_transport() -> String {
+    "stdio".into()
+}
+
+fn default_http_port() -> u16 {
+    3000
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -47,6 +59,12 @@ pub struct PricingConfig {
 pub struct PaymentConfig {
     pub nwc_url: String,
     pub invoice_expiry_seconds: u64,
+    #[serde(default)]
+    pub l402_secret: String,
+    #[serde(default)]
+    pub enable_l402: bool,
+    #[serde(default)]
+    pub enable_x402: bool,
 }
 
 impl Config {
@@ -63,6 +81,20 @@ impl Config {
         if let Ok(nwc_url) = std::env::var("NWC_URL") {
             if !nwc_url.is_empty() {
                 config.payment.nwc_url = nwc_url;
+            }
+        }
+
+        // Override L402 secret from env var
+        if let Ok(secret) = std::env::var("L402_SECRET") {
+            if !secret.is_empty() {
+                config.payment.l402_secret = secret;
+            }
+        }
+
+        // Override transport from env var
+        if let Ok(transport) = std::env::var("MCP_TRANSPORT") {
+            if !transport.is_empty() {
+                config.server.transport = transport;
             }
         }
 

@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # MCP SDK
-rmcp = { version = "0.15", features = ["server", "transport-io", "macros"] }
+rmcp = { version = "0.15", features = ["server", "transport-io", "transport-streamable-http-server", "macros"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -36,6 +36,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Configuration
 toml = "0.8"
 dotenvy = "0.15"
+
+# HTTP server (rmcp uses axum 0.8 internally)
+axum = "0.8"
+
+# L402 payment tokens
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
