@@ -49,7 +49,7 @@ pub struct ResolveNip05Response {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetProfileParams {
-    /// Public key in hex, npub (bech32), or NIP-05 (user@domain) format
+    /// Public key in hex, npub (bech32), NIP-05 (user@domain), or display name (fuzzy search via Primal)
     pub pubkey: String,
 }
 
@@ -73,6 +73,9 @@ pub struct GetProfileResponse {
     pub lud16: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub website: Option<String>,
+    /// How the profile was matched (e.g. "name_search" for fuzzy name lookup)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_by: Option<String>,
 }
 
 // ==================== check_relay ====================
@@ -105,4 +108,50 @@ pub struct CheckRelayResponse {
     /// Relay software version
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+}
+
+// ==================== search_profiles ====================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SearchProfilesParams {
+    /// Name or keyword to search for
+    pub query: String,
+    /// Maximum number of profiles to return (default: 5, max: 20)
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SearchProfilesResponse {
+    /// The search query used
+    pub query: String,
+    /// Matching profiles
+    pub profiles: Vec<ProfileSearchResult>,
+    /// Number of results returned
+    pub count: u32,
+    /// Data source used for the search
+    pub source: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ProfileSearchResult {
+    /// Hex-encoded public key
+    pub pubkey: String,
+    /// Bech32-encoded public key (npub)
+    pub pubkey_npub: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nip05: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lud16: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub website: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followers_count: Option<u64>,
 }

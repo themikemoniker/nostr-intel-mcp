@@ -10,6 +10,7 @@ use rmcp::{tool, tool_handler, tool_router, ServerHandler};
 use crate::config::Config;
 use crate::nostr::cache::{Cache, CachedProfile, CachedRelayInfo};
 use crate::nostr::client::NostrClient;
+use crate::nostr::search::ProfileSearchClient;
 use crate::payment::free_tier::FreeTierLimiter;
 use crate::payment::nwc_gateway::NwcGateway;
 use crate::tools::free::*;
@@ -19,6 +20,7 @@ pub struct NostrIntelServer {
     config: Arc<Config>,
     nostr_client: Arc<NostrClient>,
     cache: Arc<Cache>,
+    search_client: Arc<ProfileSearchClient>,
     nwc_gateway: Option<Arc<NwcGateway>>,
     rate_limiter: Arc<FreeTierLimiter>,
     session_id: String,
@@ -36,9 +38,9 @@ impl ServerHandler for NostrIntelServer {
         ServerInfo {
             instructions: Some(
                 "Nostr intelligence server. Provides tools to decode Nostr entities, \
-                 resolve NIP-05 identifiers, fetch profiles, check relay status, and \
-                 search events. Paid tools require Lightning payment after free tier \
-                 (10 calls/day) is exhausted."
+                 resolve NIP-05 identifiers, fetch profiles, search profiles by name, \
+                 check relay status, and search events. Paid tools require Lightning \
+                 payment after free tier (10 calls/day) is exhausted."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -63,6 +65,8 @@ impl NostrIntelServer {
         let nostr_client = NostrClient::new(config.relays.default.clone()).await?;
         let nostr_client = Arc::new(nostr_client);
 
+        let search_client = Arc::new(ProfileSearchClient::new());
+
         let rate_limiter = Arc::new(FreeTierLimiter::new(Arc::clone(&cache)));
 
         let nwc_gateway = if !config.payment.nwc_url.is_empty() {
@@ -85,6 +89,7 @@ impl NostrIntelServer {
             config,
             nostr_client,
             cache,
+            search_client,
             nwc_gateway,
             rate_limiter,
             session_id: "stdio".into(),
@@ -231,7 +236,7 @@ impl NostrIntelServer {
 
     #[tool(
         name = "get_profile",
-        description = "Fetch Nostr profile metadata (kind:0) for a given pubkey. Accepts hex, npub, or NIP-05 identifier."
+        description = "Fetch Nostr profile metadata (kind:0) for a given pubkey. Accepts hex, npub, NIP-05 identifier, or display name (fuzzy search via Primal)."
     )]
     async fn get_profile(
         &self,
@@ -239,16 +244,49 @@ impl NostrIntelServer {
     ) -> Result<String, String> {
         let input = params.pubkey.trim();
 
-        let pubkey = if input.contains('@') {
+        let (pubkey, matched_by) = if input.contains('@') {
             let nip05_params = ResolveNip05Params {
                 nip05: input.to_string(),
             };
             let result_json = self.resolve_nip05(Parameters(nip05_params)).await?;
             let result: ResolveNip05Response =
                 serde_json::from_str(&result_json).map_err(|e| e.to_string())?;
-            PublicKey::from_hex(&result.pubkey).map_err(|e| e.to_string())?
+            let pk = PublicKey::from_hex(&result.pubkey).map_err(|e| e.to_string())?;
+            (pk, None)
+        } else if let Ok(pk) = NostrClient::parse_pubkey(input) {
+            (pk, None)
         } else {
-            NostrClient::parse_pubkey(input).map_err(|e| e.to_string())?
+            // Fallback: search by name via Primal
+            tracing::debug!("Pubkey parse failed, trying name search for: {input}");
+            let hits = self
+                .search_client
+                .search_profiles(input, 1)
+                .await?;
+            let hit = hits.into_iter().next().ok_or_else(|| {
+                format!(
+                    "No profile found matching '{input}'. Try a hex pubkey, npub, or NIP-05 identifier."
+                )
+            })?;
+            let pk = PublicKey::from_hex(&hit.pubkey)
+                .map_err(|e| format!("Invalid pubkey from search: {e}"))?;
+
+            // Cache the search result
+            let cached = CachedProfile {
+                pubkey: hit.pubkey.clone(),
+                name: hit.name.clone(),
+                display_name: hit.display_name.clone(),
+                about: hit.about.clone(),
+                picture: hit.picture.clone(),
+                banner: None,
+                nip05: hit.nip05.clone(),
+                lud16: hit.lud16.clone(),
+                website: hit.website.clone(),
+            };
+            if let Err(e) = self.cache.set_profile(&cached).await {
+                tracing::warn!("Failed to cache search result: {e}");
+            }
+
+            (pk, Some("name_search".to_string()))
         };
 
         let pubkey_hex = pubkey.to_hex();
@@ -266,6 +304,7 @@ impl NostrIntelServer {
                 nip05: cached.nip05,
                 lud16: cached.lud16,
                 website: cached.website,
+                matched_by,
             };
             return serde_json::to_string_pretty(&response).map_err(|e| e.to_string());
         }
@@ -305,6 +344,7 @@ impl NostrIntelServer {
                     nip05: meta.nip05,
                     lud16: meta.lud16,
                     website: meta.website,
+                    matched_by,
                 };
                 serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
             }
@@ -426,6 +466,71 @@ impl NostrIntelServer {
                 serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
             }
         }
+    }
+
+    #[tool(
+        name = "search_profiles",
+        description = "Search Nostr profiles by name or keyword using Primal's cache. Returns matching profiles with metadata and follower counts."
+    )]
+    async fn search_profiles(
+        &self,
+        Parameters(params): Parameters<SearchProfilesParams>,
+    ) -> Result<String, String> {
+        let query = params.query.trim();
+        if query.is_empty() {
+            return Err("Search query cannot be empty".into());
+        }
+
+        let limit = params.limit.unwrap_or(5).min(20);
+
+        let hits = self.search_client.search_profiles(query, limit).await?;
+
+        let mut profiles = Vec::new();
+        for hit in &hits {
+            let npub = match PublicKey::from_hex(&hit.pubkey) {
+                Ok(pk) => pk.to_bech32().unwrap_or_default(),
+                Err(_) => String::new(),
+            };
+
+            // Cache each result for future get_profile hits
+            let cached = CachedProfile {
+                pubkey: hit.pubkey.clone(),
+                name: hit.name.clone(),
+                display_name: hit.display_name.clone(),
+                about: hit.about.clone(),
+                picture: hit.picture.clone(),
+                banner: None,
+                nip05: hit.nip05.clone(),
+                lud16: hit.lud16.clone(),
+                website: hit.website.clone(),
+            };
+            if let Err(e) = self.cache.set_profile(&cached).await {
+                tracing::warn!("Failed to cache search result: {e}");
+            }
+
+            profiles.push(ProfileSearchResult {
+                pubkey: hit.pubkey.clone(),
+                pubkey_npub: npub,
+                name: hit.name.clone(),
+                display_name: hit.display_name.clone(),
+                about: hit.about.clone(),
+                picture: hit.picture.clone(),
+                nip05: hit.nip05.clone(),
+                lud16: hit.lud16.clone(),
+                website: hit.website.clone(),
+                followers_count: hit.followers_count,
+            });
+        }
+
+        let count = profiles.len() as u32;
+        let response = SearchProfilesResponse {
+            query: query.to_string(),
+            profiles,
+            count,
+            source: "primal_cache".to_string(),
+        };
+
+        serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
     }
 
     // ==================== Paid tools ====================
@@ -1068,6 +1173,7 @@ pub struct SharedState {
     pub config: Arc<Config>,
     pub nostr_client: Arc<NostrClient>,
     pub cache: Arc<Cache>,
+    pub search_client: Arc<ProfileSearchClient>,
     pub nwc_gateway: Option<Arc<NwcGateway>>,
     pub rate_limiter: Arc<FreeTierLimiter>,
     pub session_counter: Arc<AtomicU64>,
@@ -1080,6 +1186,7 @@ impl NostrIntelServer {
             config: Arc::clone(&self.config),
             nostr_client: Arc::clone(&self.nostr_client),
             cache: Arc::clone(&self.cache),
+            search_client: Arc::clone(&self.search_client),
             nwc_gateway: self.nwc_gateway.clone(),
             rate_limiter: Arc::clone(&self.rate_limiter),
             session_counter: Arc::new(AtomicU64::new(0)),
@@ -1093,6 +1200,7 @@ impl NostrIntelServer {
             config: Arc::clone(&state.config),
             nostr_client: Arc::clone(&state.nostr_client),
             cache: Arc::clone(&state.cache),
+            search_client: Arc::clone(&state.search_client),
             nwc_gateway: state.nwc_gateway.clone(),
             rate_limiter: Arc::clone(&state.rate_limiter),
             session_id: format!("http-{id}"),
