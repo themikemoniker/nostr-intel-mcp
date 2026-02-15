@@ -105,6 +105,17 @@ impl Cache {
             .execute(&self.pool)
             .await?;
 
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS rate_limits (
+                client_id TEXT NOT NULL,
+                day_ordinal INTEGER NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (client_id, day_ordinal)
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -218,6 +229,50 @@ impl Cache {
         Ok(())
     }
 
+    /// Atomically check and increment a rate limit counter.
+    /// Returns `true` if the call is allowed (under the limit), `false` if exhausted.
+    pub async fn check_and_increment_rate(
+        &self,
+        client_id: &str,
+        day_ordinal: u32,
+        limit: u32,
+    ) -> anyhow::Result<bool> {
+        // Ensure a row exists for this client+day
+        sqlx::query(
+            "INSERT OR IGNORE INTO rate_limits (client_id, day_ordinal, count) VALUES (?, ?, 0)",
+        )
+        .bind(client_id)
+        .bind(day_ordinal)
+        .execute(&self.pool)
+        .await?;
+
+        // Conditionally increment only if under the limit
+        let result = sqlx::query(
+            "UPDATE rate_limits SET count = count + 1
+             WHERE client_id = ? AND day_ordinal = ? AND count < ?",
+        )
+        .bind(client_id)
+        .bind(day_ordinal)
+        .bind(limit)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Get the current rate limit count for a client on a given day.
+    pub async fn get_rate_count(&self, client_id: &str, day_ordinal: u32) -> anyhow::Result<u32> {
+        let row = sqlx::query(
+            "SELECT count FROM rate_limits WHERE client_id = ? AND day_ordinal = ?",
+        )
+        .bind(client_id)
+        .bind(day_ordinal)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| r.get::<u32, _>("count")).unwrap_or(0))
+    }
+
     pub async fn cleanup_expired(&self) -> anyhow::Result<()> {
         let now = Self::now();
         sqlx::query("DELETE FROM profiles WHERE expires_at < ?")
@@ -228,6 +283,17 @@ impl Cache {
             .bind(now)
             .execute(&self.pool)
             .await?;
+        // Clean up rate limit rows from previous days
+        let today = current_day_ordinal();
+        sqlx::query("DELETE FROM rate_limits WHERE day_ordinal < ?")
+            .bind(today)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
+}
+
+fn current_day_ordinal() -> u32 {
+    use chrono::Datelike;
+    chrono::Utc::now().ordinal()
 }

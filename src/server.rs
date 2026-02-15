@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use nostr_sdk::prelude::*;
@@ -20,7 +21,13 @@ pub struct NostrIntelServer {
     cache: Arc<Cache>,
     nwc_gateway: Option<Arc<NwcGateway>>,
     rate_limiter: Arc<FreeTierLimiter>,
+    session_id: String,
     tool_router: ToolRouter<Self>,
+}
+
+enum PaymentGateResult {
+    Proceed,
+    EarlyReturn(String),
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -56,7 +63,7 @@ impl NostrIntelServer {
         let nostr_client = NostrClient::new(config.relays.default.clone()).await?;
         let nostr_client = Arc::new(nostr_client);
 
-        let rate_limiter = Arc::new(FreeTierLimiter::new());
+        let rate_limiter = Arc::new(FreeTierLimiter::new(Arc::clone(&cache)));
 
         let nwc_gateway = if !config.payment.nwc_url.is_empty() {
             match NwcGateway::new(&config.payment.nwc_url) {
@@ -80,6 +87,7 @@ impl NostrIntelServer {
             cache,
             nwc_gateway,
             rate_limiter,
+            session_id: "stdio".into(),
             tool_router: Self::tool_router(),
         })
     }
@@ -430,56 +438,14 @@ impl NostrIntelServer {
         &self,
         Parameters(params): Parameters<SearchEventsParams>,
     ) -> Result<String, String> {
-        // 1. If payment_hash provided, verify payment first
-        if let Some(ref hash) = params.payment_hash {
-            let gw = self
-                .nwc_gateway
-                .as_ref()
-                .ok_or("Payment system not configured")?;
-            let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
-            if !paid {
-                return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
-            }
-            // Payment verified — fall through to execute search
-        } else {
-            // 2. Check free tier
-            let under_limit = self
-                .rate_limiter
-                .check_and_increment("stdio", self.config.free_tier.calls_per_day)
-                .await;
-            if !under_limit {
-                // 3. Generate invoice if NWC is configured
-                let gw = self
-                    .nwc_gateway
-                    .as_ref()
-                    .ok_or("Free tier exhausted and payment system not configured")?;
-                let amount = self.calculate_price(&params);
-                let inv = gw
-                    .create_invoice(
-                        "search_events",
-                        amount,
-                        "nostr-intel: search_events",
-                        self.config.payment.invoice_expiry_seconds,
-                    )
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let resp = PaymentRequiredResponse {
-                    payment_required: true,
-                    tool_name: "search_events".into(),
-                    amount_sats: amount,
-                    invoice: inv.invoice,
-                    payment_hash: inv.payment_hash,
-                    message: format!(
-                        "Free tier exhausted. Payment required: {amount} sats. \
-                         Pay the invoice, then retry with the payment_hash parameter."
-                    ),
-                };
-                return serde_json::to_string_pretty(&resp).map_err(|e| e.to_string());
-            }
-            // Under free tier — fall through to execute search
+        // Payment gate
+        let amount = self.calculate_price(&params);
+        match self.payment_gate("search_events", amount, params.payment_hash.as_deref()).await? {
+            PaymentGateResult::EarlyReturn(json) => return Ok(json),
+            PaymentGateResult::Proceed => {}
         }
 
-        // 4. Execute search
+        // Execute search
         let authors = if let Some(ref author_strs) = params.authors {
             let mut pks = Vec::new();
             for a in author_strs {
@@ -570,45 +536,10 @@ impl NostrIntelServer {
         Parameters(params): Parameters<RelayDiscoveryParams>,
     ) -> Result<String, String> {
         // Payment gate
-        if let Some(ref hash) = params.payment_hash {
-            let gw = self
-                .nwc_gateway
-                .as_ref()
-                .ok_or("Payment system not configured")?;
-            let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
-            if !paid {
-                return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
-            }
-        } else {
-            let under_limit = self
-                .rate_limiter
-                .check_and_increment("stdio", self.config.free_tier.calls_per_day)
-                .await;
-            if !under_limit {
-                let gw = self
-                    .nwc_gateway
-                    .as_ref()
-                    .ok_or("Free tier exhausted and payment system not configured")?;
-                let amount = self.config.pricing.relay_discovery;
-                let inv = gw
-                    .create_invoice(
-                        "relay_discovery",
-                        amount,
-                        "nostr-intel: relay_discovery",
-                        self.config.payment.invoice_expiry_seconds,
-                    )
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let resp = PaymentRequiredResponse {
-                    payment_required: true,
-                    tool_name: "relay_discovery".into(),
-                    amount_sats: amount,
-                    invoice: inv.invoice,
-                    payment_hash: inv.payment_hash,
-                    message: format!("Free tier exhausted. Payment required: {amount} sats. Pay the invoice, then retry with the payment_hash parameter."),
-                };
-                return serde_json::to_string_pretty(&resp).map_err(|e| e.to_string());
-            }
+        let amount = self.config.pricing.relay_discovery;
+        match self.payment_gate("relay_discovery", amount, params.payment_hash.as_deref()).await? {
+            PaymentGateResult::EarlyReturn(json) => return Ok(json),
+            PaymentGateResult::Proceed => {}
         }
 
         // Execute
@@ -675,45 +606,10 @@ impl NostrIntelServer {
         Parameters(params): Parameters<TrendingNotesParams>,
     ) -> Result<String, String> {
         // Payment gate
-        if let Some(ref hash) = params.payment_hash {
-            let gw = self
-                .nwc_gateway
-                .as_ref()
-                .ok_or("Payment system not configured")?;
-            let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
-            if !paid {
-                return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
-            }
-        } else {
-            let under_limit = self
-                .rate_limiter
-                .check_and_increment("stdio", self.config.free_tier.calls_per_day)
-                .await;
-            if !under_limit {
-                let gw = self
-                    .nwc_gateway
-                    .as_ref()
-                    .ok_or("Free tier exhausted and payment system not configured")?;
-                let amount = self.config.pricing.trending_notes;
-                let inv = gw
-                    .create_invoice(
-                        "trending_notes",
-                        amount,
-                        "nostr-intel: trending_notes",
-                        self.config.payment.invoice_expiry_seconds,
-                    )
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let resp = PaymentRequiredResponse {
-                    payment_required: true,
-                    tool_name: "trending_notes".into(),
-                    amount_sats: amount,
-                    invoice: inv.invoice,
-                    payment_hash: inv.payment_hash,
-                    message: format!("Free tier exhausted. Payment required: {amount} sats. Pay the invoice, then retry with the payment_hash parameter."),
-                };
-                return serde_json::to_string_pretty(&resp).map_err(|e| e.to_string());
-            }
+        let amount = self.config.pricing.trending_notes;
+        match self.payment_gate("trending_notes", amount, params.payment_hash.as_deref()).await? {
+            PaymentGateResult::EarlyReturn(json) => return Ok(json),
+            PaymentGateResult::Proceed => {}
         }
 
         // Execute
@@ -837,45 +733,10 @@ impl NostrIntelServer {
         let depth = params.depth.unwrap_or(1).clamp(1, 2);
 
         // Payment gate
-        if let Some(ref hash) = params.payment_hash {
-            let gw = self
-                .nwc_gateway
-                .as_ref()
-                .ok_or("Payment system not configured")?;
-            let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
-            if !paid {
-                return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
-            }
-        } else {
-            let under_limit = self
-                .rate_limiter
-                .check_and_increment("stdio", self.config.free_tier.calls_per_day)
-                .await;
-            if !under_limit {
-                let gw = self
-                    .nwc_gateway
-                    .as_ref()
-                    .ok_or("Free tier exhausted and payment system not configured")?;
-                let amount = self.calculate_follower_graph_price(depth);
-                let inv = gw
-                    .create_invoice(
-                        "get_follower_graph",
-                        amount,
-                        "nostr-intel: get_follower_graph",
-                        self.config.payment.invoice_expiry_seconds,
-                    )
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let resp = PaymentRequiredResponse {
-                    payment_required: true,
-                    tool_name: "get_follower_graph".into(),
-                    amount_sats: amount,
-                    invoice: inv.invoice,
-                    payment_hash: inv.payment_hash,
-                    message: format!("Free tier exhausted. Payment required: {amount} sats. Pay the invoice, then retry with the payment_hash parameter."),
-                };
-                return serde_json::to_string_pretty(&resp).map_err(|e| e.to_string());
-            }
+        let amount = self.calculate_follower_graph_price(depth);
+        match self.payment_gate("get_follower_graph", amount, params.payment_hash.as_deref()).await? {
+            PaymentGateResult::EarlyReturn(json) => return Ok(json),
+            PaymentGateResult::Proceed => {}
         }
 
         // Execute
@@ -980,45 +841,10 @@ impl NostrIntelServer {
         Parameters(params): Parameters<ZapAnalyticsParams>,
     ) -> Result<String, String> {
         // Payment gate
-        if let Some(ref hash) = params.payment_hash {
-            let gw = self
-                .nwc_gateway
-                .as_ref()
-                .ok_or("Payment system not configured")?;
-            let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
-            if !paid {
-                return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
-            }
-        } else {
-            let under_limit = self
-                .rate_limiter
-                .check_and_increment("stdio", self.config.free_tier.calls_per_day)
-                .await;
-            if !under_limit {
-                let gw = self
-                    .nwc_gateway
-                    .as_ref()
-                    .ok_or("Free tier exhausted and payment system not configured")?;
-                let amount = self.config.pricing.zap_analytics;
-                let inv = gw
-                    .create_invoice(
-                        "zap_analytics",
-                        amount,
-                        "nostr-intel: zap_analytics",
-                        self.config.payment.invoice_expiry_seconds,
-                    )
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let resp = PaymentRequiredResponse {
-                    payment_required: true,
-                    tool_name: "zap_analytics".into(),
-                    amount_sats: amount,
-                    invoice: inv.invoice,
-                    payment_hash: inv.payment_hash,
-                    message: format!("Free tier exhausted. Payment required: {amount} sats. Pay the invoice, then retry with the payment_hash parameter."),
-                };
-                return serde_json::to_string_pretty(&resp).map_err(|e| e.to_string());
-            }
+        let amount = self.config.pricing.zap_analytics;
+        match self.payment_gate("zap_analytics", amount, params.payment_hash.as_deref()).await? {
+            PaymentGateResult::EarlyReturn(json) => return Ok(json),
+            PaymentGateResult::Proceed => {}
         }
 
         // Execute
@@ -1153,6 +979,86 @@ impl NostrIntelServer {
             self.config.pricing.get_follower_graph
         }
     }
+
+    /// Unified payment gate for all paid tools.
+    /// - With payment_hash: verify via NWC, return Proceed
+    /// - Under free tier: increment counter, return Proceed
+    /// - Over limit + NWC: create invoice, return EarlyReturn(PaymentRequiredResponse)
+    /// - Over limit + no NWC: return EarlyReturn(FreeTierExhaustedResponse) — Ok, not Err!
+    async fn payment_gate(
+        &self,
+        tool_name: &str,
+        amount: u64,
+        payment_hash: Option<&str>,
+    ) -> Result<PaymentGateResult, String> {
+        if let Some(hash) = payment_hash {
+            let gw = self
+                .nwc_gateway
+                .as_ref()
+                .ok_or("Payment system not configured")?;
+            let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
+            if !paid {
+                return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
+            }
+            return Ok(PaymentGateResult::Proceed);
+        }
+
+        // No payment hash — check free tier
+        let under_limit = self
+            .rate_limiter
+            .check_and_increment(&self.session_id, self.config.free_tier.calls_per_day)
+            .await;
+
+        if under_limit {
+            return Ok(PaymentGateResult::Proceed);
+        }
+
+        // Free tier exhausted
+        match &self.nwc_gateway {
+            Some(gw) => {
+                let description = format!("nostr-intel: {tool_name}");
+                let inv = gw
+                    .create_invoice(
+                        tool_name,
+                        amount,
+                        &description,
+                        self.config.payment.invoice_expiry_seconds,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let resp = PaymentRequiredResponse {
+                    payment_required: true,
+                    tool_name: tool_name.into(),
+                    amount_sats: amount,
+                    invoice: inv.invoice,
+                    payment_hash: inv.payment_hash,
+                    message: format!(
+                        "Free tier exhausted. Payment required: {amount} sats. \
+                         Pay the invoice, then retry with the payment_hash parameter."
+                    ),
+                };
+                let json = serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?;
+                Ok(PaymentGateResult::EarlyReturn(json))
+            }
+            None => {
+                let calls_used = self.rate_limiter.get_current_count(&self.session_id).await;
+                let resp = FreeTierExhaustedResponse {
+                    free_tier_exhausted: true,
+                    calls_used,
+                    calls_limit: self.config.free_tier.calls_per_day,
+                    message: format!(
+                        "Free tier exhausted ({calls_used}/{} calls used today). \
+                         Payment system is not currently available. \
+                         Free tier resets daily.",
+                        self.config.free_tier.calls_per_day
+                    ),
+                    payment_available: false,
+                };
+                let json = serde_json::to_string_pretty(&resp).map_err(|e| e.to_string())?;
+                Ok(PaymentGateResult::EarlyReturn(json))
+            }
+        }
+    }
 }
 
 // ==================== SharedState for HTTP transport ====================
@@ -1164,6 +1070,7 @@ pub struct SharedState {
     pub cache: Arc<Cache>,
     pub nwc_gateway: Option<Arc<NwcGateway>>,
     pub rate_limiter: Arc<FreeTierLimiter>,
+    pub session_counter: Arc<AtomicU64>,
 }
 
 impl NostrIntelServer {
@@ -1175,17 +1082,20 @@ impl NostrIntelServer {
             cache: Arc::clone(&self.cache),
             nwc_gateway: self.nwc_gateway.clone(),
             rate_limiter: Arc::clone(&self.rate_limiter),
+            session_counter: Arc::new(AtomicU64::new(0)),
         }
     }
 
     /// Create a new server instance from shared state (for per-session HTTP factory).
     pub fn from_shared(state: &SharedState) -> Self {
+        let id = state.session_counter.fetch_add(1, Ordering::Relaxed);
         Self {
             config: Arc::clone(&state.config),
             nostr_client: Arc::clone(&state.nostr_client),
             cache: Arc::clone(&state.cache),
             nwc_gateway: state.nwc_gateway.clone(),
             rate_limiter: Arc::clone(&state.rate_limiter),
+            session_id: format!("http-{id}"),
             tool_router: Self::tool_router(),
         }
     }

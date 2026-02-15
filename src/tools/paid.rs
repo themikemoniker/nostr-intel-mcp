@@ -174,3 +174,14 @@ pub struct PaymentRequiredResponse {
     pub payment_hash: String,
     pub message: String,
 }
+
+// ==================== free tier exhausted (no NWC) ====================
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FreeTierExhaustedResponse {
+    pub free_tier_exhausted: bool,
+    pub calls_used: u32,
+    pub calls_limit: u32,
+    pub message: String,
+    pub payment_available: bool,
+}
