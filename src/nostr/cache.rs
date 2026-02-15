@@ -262,13 +262,12 @@ impl Cache {
 
     /// Get the current rate limit count for a client on a given day.
     pub async fn get_rate_count(&self, client_id: &str, day_ordinal: u32) -> anyhow::Result<u32> {
-        let row = sqlx::query(
-            "SELECT count FROM rate_limits WHERE client_id = ? AND day_ordinal = ?",
-        )
-        .bind(client_id)
-        .bind(day_ordinal)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row =
+            sqlx::query("SELECT count FROM rate_limits WHERE client_id = ? AND day_ordinal = ?")
+                .bind(client_id)
+                .bind(day_ordinal)
+                .fetch_optional(&self.pool)
+                .await?;
 
         Ok(row.map(|r| r.get::<u32, _>("count")).unwrap_or(0))
     }

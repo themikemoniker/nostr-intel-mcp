@@ -16,7 +16,11 @@ impl FreeTierLimiter {
     /// Fails open: if SQLite errors, allows the call.
     pub async fn check_and_increment(&self, client_id: &str, limit: u32) -> bool {
         let today = current_day();
-        match self.cache.check_and_increment_rate(client_id, today, limit).await {
+        match self
+            .cache
+            .check_and_increment_rate(client_id, today, limit)
+            .await
+        {
             Ok(allowed) => allowed,
             Err(e) => {
                 tracing::warn!("Rate limit check failed (allowing call): {e}");

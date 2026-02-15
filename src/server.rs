@@ -258,10 +258,7 @@ impl NostrIntelServer {
         } else {
             // Fallback: search by name via Primal
             tracing::debug!("Pubkey parse failed, trying name search for: {input}");
-            let hits = self
-                .search_client
-                .search_profiles(input, 1)
-                .await?;
+            let hits = self.search_client.search_profiles(input, 1).await?;
             let hit = hits.into_iter().next().ok_or_else(|| {
                 format!(
                     "No profile found matching '{input}'. Try a hex pubkey, npub, or NIP-05 identifier."
@@ -545,7 +542,10 @@ impl NostrIntelServer {
     ) -> Result<String, String> {
         // Payment gate
         let amount = self.calculate_price(&params);
-        match self.payment_gate("search_events", amount, params.payment_hash.as_deref()).await? {
+        match self
+            .payment_gate("search_events", amount, params.payment_hash.as_deref())
+            .await?
+        {
             PaymentGateResult::EarlyReturn(json) => return Ok(json),
             PaymentGateResult::Proceed => {}
         }
@@ -642,7 +642,10 @@ impl NostrIntelServer {
     ) -> Result<String, String> {
         // Payment gate
         let amount = self.config.pricing.relay_discovery;
-        match self.payment_gate("relay_discovery", amount, params.payment_hash.as_deref()).await? {
+        match self
+            .payment_gate("relay_discovery", amount, params.payment_hash.as_deref())
+            .await?
+        {
             PaymentGateResult::EarlyReturn(json) => return Ok(json),
             PaymentGateResult::Proceed => {}
         }
@@ -712,7 +715,10 @@ impl NostrIntelServer {
     ) -> Result<String, String> {
         // Payment gate
         let amount = self.config.pricing.trending_notes;
-        match self.payment_gate("trending_notes", amount, params.payment_hash.as_deref()).await? {
+        match self
+            .payment_gate("trending_notes", amount, params.payment_hash.as_deref())
+            .await?
+        {
             PaymentGateResult::EarlyReturn(json) => return Ok(json),
             PaymentGateResult::Proceed => {}
         }
@@ -839,7 +845,10 @@ impl NostrIntelServer {
 
         // Payment gate
         let amount = self.calculate_follower_graph_price(depth);
-        match self.payment_gate("get_follower_graph", amount, params.payment_hash.as_deref()).await? {
+        match self
+            .payment_gate("get_follower_graph", amount, params.payment_hash.as_deref())
+            .await?
+        {
             PaymentGateResult::EarlyReturn(json) => return Ok(json),
             PaymentGateResult::Proceed => {}
         }
@@ -947,7 +956,10 @@ impl NostrIntelServer {
     ) -> Result<String, String> {
         // Payment gate
         let amount = self.config.pricing.zap_analytics;
-        match self.payment_gate("zap_analytics", amount, params.payment_hash.as_deref()).await? {
+        match self
+            .payment_gate("zap_analytics", amount, params.payment_hash.as_deref())
+            .await?
+        {
             PaymentGateResult::EarlyReturn(json) => return Ok(json),
             PaymentGateResult::Proceed => {}
         }
