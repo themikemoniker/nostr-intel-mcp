@@ -9,7 +9,7 @@ pub struct DecodeNostrUriParams {
     pub uri: String,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DecodeNostrUriResponse {
     /// Entity type: pubkey, event_id, profile, event, or coordinate
     pub entity_type: String,

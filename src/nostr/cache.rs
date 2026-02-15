@@ -296,3 +296,109 @@ fn current_day_ordinal() -> u32 {
     use chrono::Datelike;
     chrono::Utc::now().ordinal()
 }
+
+#[cfg(test)]
+impl Cache {
+    /// Create an in-memory SQLite cache for tests.
+    pub async fn new_in_memory() -> Self {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:")
+            .expect("valid memory DSN")
+            .journal_mode(SqliteJournalMode::Wal);
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("connect in-memory SQLite");
+
+        let cache = Self {
+            pool,
+            profile_ttl: 3600,
+            relay_ttl: 600,
+        };
+        cache.init_schema().await.expect("init schema");
+        cache
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn allows_under_limit() {
+        let cache = Cache::new_in_memory().await;
+        for _ in 0..10 {
+            let allowed = cache
+                .check_and_increment_rate("client1", 1, 10)
+                .await
+                .unwrap();
+            assert!(allowed);
+        }
+    }
+
+    #[tokio::test]
+    async fn blocks_over_limit() {
+        let cache = Cache::new_in_memory().await;
+        for _ in 0..10 {
+            cache
+                .check_and_increment_rate("client1", 1, 10)
+                .await
+                .unwrap();
+        }
+        let allowed = cache
+            .check_and_increment_rate("client1", 1, 10)
+            .await
+            .unwrap();
+        assert!(!allowed);
+    }
+
+    #[tokio::test]
+    async fn count_tracks_usage() {
+        let cache = Cache::new_in_memory().await;
+        assert_eq!(cache.get_rate_count("client1", 1).await.unwrap(), 0);
+
+        for i in 1..=5 {
+            cache
+                .check_and_increment_rate("client1", 1, 10)
+                .await
+                .unwrap();
+            assert_eq!(cache.get_rate_count("client1", 1).await.unwrap(), i);
+        }
+    }
+
+    #[tokio::test]
+    async fn per_client_isolation() {
+        let cache = Cache::new_in_memory().await;
+        for _ in 0..3 {
+            cache
+                .check_and_increment_rate("alice", 1, 10)
+                .await
+                .unwrap();
+        }
+        for _ in 0..5 {
+            cache.check_and_increment_rate("bob", 1, 10).await.unwrap();
+        }
+        assert_eq!(cache.get_rate_count("alice", 1).await.unwrap(), 3);
+        assert_eq!(cache.get_rate_count("bob", 1).await.unwrap(), 5);
+    }
+
+    #[tokio::test]
+    async fn per_day_isolation() {
+        let cache = Cache::new_in_memory().await;
+        for _ in 0..3 {
+            cache
+                .check_and_increment_rate("client1", 100, 10)
+                .await
+                .unwrap();
+        }
+        for _ in 0..7 {
+            cache
+                .check_and_increment_rate("client1", 101, 10)
+                .await
+                .unwrap();
+        }
+        assert_eq!(cache.get_rate_count("client1", 100).await.unwrap(), 3);
+        assert_eq!(cache.get_rate_count("client1", 101).await.unwrap(), 7);
+    }
+}

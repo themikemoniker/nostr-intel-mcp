@@ -107,72 +107,7 @@ impl NostrIntelServer {
         &self,
         Parameters(params): Parameters<DecodeNostrUriParams>,
     ) -> Result<String, String> {
-        let uri = params.uri.trim();
-        let bech32 = uri.strip_prefix("nostr:").unwrap_or(uri);
-
-        let nip19 = Nip19::from_bech32(bech32).map_err(|e| format!("Invalid Nostr URI: {e}"))?;
-
-        let response = match nip19 {
-            Nip19::Pubkey(pk) => DecodeNostrUriResponse {
-                entity_type: "pubkey".into(),
-                hex_id: pk.to_hex(),
-                relays: None,
-                author_hex: None,
-                kind: None,
-            },
-            Nip19::EventId(id) => DecodeNostrUriResponse {
-                entity_type: "event_id".into(),
-                hex_id: id.to_hex(),
-                relays: None,
-                author_hex: None,
-                kind: None,
-            },
-            Nip19::Profile(profile) => {
-                let relays: Vec<String> =
-                    profile.relays.into_iter().map(|r| r.to_string()).collect();
-                DecodeNostrUriResponse {
-                    entity_type: "profile".into(),
-                    hex_id: profile.public_key.to_hex(),
-                    relays: if relays.is_empty() {
-                        None
-                    } else {
-                        Some(relays)
-                    },
-                    author_hex: None,
-                    kind: None,
-                }
-            }
-            Nip19::Event(event) => {
-                let relays: Vec<String> = event.relays.into_iter().map(|r| r.to_string()).collect();
-                DecodeNostrUriResponse {
-                    entity_type: "event".into(),
-                    hex_id: event.event_id.to_hex(),
-                    relays: if relays.is_empty() {
-                        None
-                    } else {
-                        Some(relays)
-                    },
-                    author_hex: event.author.map(|a| a.to_hex()),
-                    kind: event.kind.map(|k| k.as_u16() as u32),
-                }
-            }
-            Nip19::Coordinate(coord) => {
-                let relays: Vec<String> = coord.relays.into_iter().map(|r| r.to_string()).collect();
-                DecodeNostrUriResponse {
-                    entity_type: "coordinate".into(),
-                    hex_id: coord.coordinate.identifier.clone(),
-                    relays: if relays.is_empty() {
-                        None
-                    } else {
-                        Some(relays)
-                    },
-                    author_hex: Some(coord.coordinate.public_key.to_hex()),
-                    kind: Some(coord.coordinate.kind.as_u16() as u32),
-                }
-            }
-            _ => return Err("Unsupported NIP-19 entity type".into()),
-        };
-
+        let response = decode_nostr_uri_inner(&params.uri)?;
         serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
     }
 
@@ -1221,6 +1156,75 @@ impl NostrIntelServer {
     }
 }
 
+// ==================== decode logic ====================
+
+fn decode_nostr_uri_inner(uri: &str) -> Result<DecodeNostrUriResponse, String> {
+    let uri = uri.trim();
+    let bech32 = uri.strip_prefix("nostr:").unwrap_or(uri);
+
+    let nip19 = Nip19::from_bech32(bech32).map_err(|e| format!("Invalid Nostr URI: {e}"))?;
+
+    match nip19 {
+        Nip19::Pubkey(pk) => Ok(DecodeNostrUriResponse {
+            entity_type: "pubkey".into(),
+            hex_id: pk.to_hex(),
+            relays: None,
+            author_hex: None,
+            kind: None,
+        }),
+        Nip19::EventId(id) => Ok(DecodeNostrUriResponse {
+            entity_type: "event_id".into(),
+            hex_id: id.to_hex(),
+            relays: None,
+            author_hex: None,
+            kind: None,
+        }),
+        Nip19::Profile(profile) => {
+            let relays: Vec<String> = profile.relays.into_iter().map(|r| r.to_string()).collect();
+            Ok(DecodeNostrUriResponse {
+                entity_type: "profile".into(),
+                hex_id: profile.public_key.to_hex(),
+                relays: if relays.is_empty() {
+                    None
+                } else {
+                    Some(relays)
+                },
+                author_hex: None,
+                kind: None,
+            })
+        }
+        Nip19::Event(event) => {
+            let relays: Vec<String> = event.relays.into_iter().map(|r| r.to_string()).collect();
+            Ok(DecodeNostrUriResponse {
+                entity_type: "event".into(),
+                hex_id: event.event_id.to_hex(),
+                relays: if relays.is_empty() {
+                    None
+                } else {
+                    Some(relays)
+                },
+                author_hex: event.author.map(|a| a.to_hex()),
+                kind: event.kind.map(|k| k.as_u16() as u32),
+            })
+        }
+        Nip19::Coordinate(coord) => {
+            let relays: Vec<String> = coord.relays.into_iter().map(|r| r.to_string()).collect();
+            Ok(DecodeNostrUriResponse {
+                entity_type: "coordinate".into(),
+                hex_id: coord.coordinate.identifier.clone(),
+                relays: if relays.is_empty() {
+                    None
+                } else {
+                    Some(relays)
+                },
+                author_hex: Some(coord.coordinate.public_key.to_hex()),
+                kind: Some(coord.coordinate.kind.as_u16() as u32),
+            })
+        }
+        _ => Err("Unsupported NIP-19 entity type".into()),
+    }
+}
+
 // ==================== helper functions ====================
 
 /// Parse timeframe strings like "1h", "24h", "7d", "30d", "90d", "1y" into seconds
@@ -1364,4 +1368,114 @@ fn extract_zapper_pubkey(event: &Event) -> Option<String> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A well-known hex pubkey for test vectors
+    const TEST_HEX: &str = "7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e";
+
+    fn test_pubkey() -> PublicKey {
+        PublicKey::from_hex(TEST_HEX).unwrap()
+    }
+
+    fn test_event_id() -> EventId {
+        // Use the same hex as an event id for simplicity
+        EventId::from_hex(TEST_HEX).unwrap()
+    }
+
+    #[test]
+    fn decode_npub() {
+        let npub = test_pubkey().to_bech32().unwrap();
+        let resp = decode_nostr_uri_inner(&npub).unwrap();
+        assert_eq!(resp.entity_type, "pubkey");
+        assert_eq!(resp.hex_id, TEST_HEX);
+        assert!(resp.relays.is_none());
+        assert!(resp.author_hex.is_none());
+        assert!(resp.kind.is_none());
+    }
+
+    #[test]
+    fn decode_note() {
+        let note = test_event_id().to_bech32().unwrap();
+        let resp = decode_nostr_uri_inner(&note).unwrap();
+        assert_eq!(resp.entity_type, "event_id");
+        assert_eq!(resp.hex_id, TEST_HEX);
+    }
+
+    #[test]
+    fn decode_nprofile_with_relays() {
+        let relay = RelayUrl::parse("wss://relay.damus.io").unwrap();
+        let nprofile = Nip19Profile::new(test_pubkey(), [relay.clone()]);
+        let bech32 = nprofile.to_bech32().unwrap();
+
+        let resp = decode_nostr_uri_inner(&bech32).unwrap();
+        assert_eq!(resp.entity_type, "profile");
+        assert_eq!(resp.hex_id, TEST_HEX);
+        let relays = resp.relays.unwrap();
+        assert_eq!(relays.len(), 1);
+        assert_eq!(relays[0], "wss://relay.damus.io");
+    }
+
+    #[test]
+    fn decode_nprofile_no_relays() {
+        let nprofile = Nip19Profile::new(test_pubkey(), Vec::<RelayUrl>::new());
+        let bech32 = nprofile.to_bech32().unwrap();
+
+        let resp = decode_nostr_uri_inner(&bech32).unwrap();
+        assert_eq!(resp.entity_type, "profile");
+        assert!(resp.relays.is_none());
+    }
+
+    #[test]
+    fn decode_nevent_with_author_and_kind() {
+        let relay = RelayUrl::parse("wss://nos.lol").unwrap();
+        let nevent = Nip19Event::new(test_event_id())
+            .relays(vec![relay])
+            .author(test_pubkey())
+            .kind(Kind::TextNote);
+        let bech32 = nevent.to_bech32().unwrap();
+
+        let resp = decode_nostr_uri_inner(&bech32).unwrap();
+        assert_eq!(resp.entity_type, "event");
+        assert_eq!(resp.hex_id, TEST_HEX);
+        assert_eq!(resp.author_hex.as_deref(), Some(TEST_HEX));
+        assert_eq!(resp.kind, Some(1));
+        let relays = resp.relays.unwrap();
+        assert_eq!(relays[0], "wss://nos.lol");
+    }
+
+    #[test]
+    fn decode_naddr_coordinate() {
+        let coord = Coordinate::new(Kind::from(30023), test_pubkey()).identifier("my-article");
+        let relay = RelayUrl::parse("wss://relay.damus.io").unwrap();
+        let naddr = Nip19Coordinate::new(coord, [relay]);
+        let bech32 = naddr.to_bech32().unwrap();
+
+        let resp = decode_nostr_uri_inner(&bech32).unwrap();
+        assert_eq!(resp.entity_type, "coordinate");
+        assert_eq!(resp.hex_id, "my-article");
+        assert_eq!(resp.author_hex.as_deref(), Some(TEST_HEX));
+        assert_eq!(resp.kind, Some(30023));
+        assert!(resp.relays.is_some());
+    }
+
+    #[test]
+    fn decode_nostr_prefix_strip() {
+        let npub = test_pubkey().to_bech32().unwrap();
+        let with_prefix = format!("nostr:{npub}");
+
+        let resp = decode_nostr_uri_inner(&with_prefix).unwrap();
+        assert_eq!(resp.entity_type, "pubkey");
+        assert_eq!(resp.hex_id, TEST_HEX);
+    }
+
+    #[test]
+    fn decode_invalid_input() {
+        let result = decode_nostr_uri_inner("garbage");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid Nostr URI"));
+    }
 }
