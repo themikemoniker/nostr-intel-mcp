@@ -130,8 +130,7 @@ impl NostrIntelServer {
                 }
             }
             Nip19::Event(event) => {
-                let relays: Vec<String> =
-                    event.relays.into_iter().map(|r| r.to_string()).collect();
+                let relays: Vec<String> = event.relays.into_iter().map(|r| r.to_string()).collect();
                 DecodeNostrUriResponse {
                     entity_type: "event".into(),
                     hex_id: event.event_id.to_hex(),
@@ -145,8 +144,7 @@ impl NostrIntelServer {
                 }
             }
             Nip19::Coordinate(coord) => {
-                let relays: Vec<String> =
-                    coord.relays.into_iter().map(|r| r.to_string()).collect();
+                let relays: Vec<String> = coord.relays.into_iter().map(|r| r.to_string()).collect();
                 DecodeNostrUriResponse {
                     entity_type: "coordinate".into(),
                     hex_id: coord.coordinate.identifier.clone(),
@@ -195,8 +193,10 @@ impl NostrIntelServer {
             return Err(format!("HTTP error: {}", resp.status()));
         }
 
-        let json: serde_json::Value =
-            resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let json: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         let pubkey_hex = json["names"][name]
             .as_str()
@@ -438,9 +438,7 @@ impl NostrIntelServer {
                 .ok_or("Payment system not configured")?;
             let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
             if !paid {
-                return Err(
-                    "Payment not confirmed. Invoice may be unpaid or expired.".into(),
-                );
+                return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
             }
             // Payment verified — fall through to execute search
         } else {
@@ -494,9 +492,10 @@ impl NostrIntelServer {
             None
         };
 
-        let kinds = params.kinds.as_ref().map(|ks| {
-            ks.iter().map(|k| Kind::from(*k as u16)).collect()
-        });
+        let kinds = params
+            .kinds
+            .as_ref()
+            .map(|ks| ks.iter().map(|k| Kind::from(*k as u16)).collect());
 
         let since = params.since_hours.map(|hours| {
             let secs_ago = hours * 3600;
@@ -572,7 +571,10 @@ impl NostrIntelServer {
     ) -> Result<String, String> {
         // Payment gate
         if let Some(ref hash) = params.payment_hash {
-            let gw = self.nwc_gateway.as_ref().ok_or("Payment system not configured")?;
+            let gw = self
+                .nwc_gateway
+                .as_ref()
+                .ok_or("Payment system not configured")?;
             let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
             if !paid {
                 return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
@@ -583,12 +585,20 @@ impl NostrIntelServer {
                 .check_and_increment("stdio", self.config.free_tier.calls_per_day)
                 .await;
             if !under_limit {
-                let gw = self.nwc_gateway.as_ref()
+                let gw = self
+                    .nwc_gateway
+                    .as_ref()
                     .ok_or("Free tier exhausted and payment system not configured")?;
                 let amount = self.config.pricing.relay_discovery;
                 let inv = gw
-                    .create_invoice("relay_discovery", amount, "nostr-intel: relay_discovery", self.config.payment.invoice_expiry_seconds)
-                    .await.map_err(|e| e.to_string())?;
+                    .create_invoice(
+                        "relay_discovery",
+                        amount,
+                        "nostr-intel: relay_discovery",
+                        self.config.payment.invoice_expiry_seconds,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
                 let resp = PaymentRequiredResponse {
                     payment_required: true,
                     tool_name: "relay_discovery".into(),
@@ -605,8 +615,11 @@ impl NostrIntelServer {
         let pubkey = NostrClient::parse_pubkey(params.pubkey.trim())
             .map_err(|e| format!("Invalid pubkey: {e}"))?;
 
-        let relay_events = self.nostr_client.fetch_relay_list(&pubkey)
-            .await.map_err(|e| format!("Failed to fetch relay list: {e}"))?;
+        let relay_events = self
+            .nostr_client
+            .fetch_relay_list(&pubkey)
+            .await
+            .map_err(|e| format!("Failed to fetch relay list: {e}"))?;
 
         let mut write_relays = Vec::new();
         let mut read_relays = Vec::new();
@@ -663,7 +676,10 @@ impl NostrIntelServer {
     ) -> Result<String, String> {
         // Payment gate
         if let Some(ref hash) = params.payment_hash {
-            let gw = self.nwc_gateway.as_ref().ok_or("Payment system not configured")?;
+            let gw = self
+                .nwc_gateway
+                .as_ref()
+                .ok_or("Payment system not configured")?;
             let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
             if !paid {
                 return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
@@ -674,12 +690,20 @@ impl NostrIntelServer {
                 .check_and_increment("stdio", self.config.free_tier.calls_per_day)
                 .await;
             if !under_limit {
-                let gw = self.nwc_gateway.as_ref()
+                let gw = self
+                    .nwc_gateway
+                    .as_ref()
                     .ok_or("Free tier exhausted and payment system not configured")?;
                 let amount = self.config.pricing.trending_notes;
                 let inv = gw
-                    .create_invoice("trending_notes", amount, "nostr-intel: trending_notes", self.config.payment.invoice_expiry_seconds)
-                    .await.map_err(|e| e.to_string())?;
+                    .create_invoice(
+                        "trending_notes",
+                        amount,
+                        "nostr-intel: trending_notes",
+                        self.config.payment.invoice_expiry_seconds,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
                 let resp = PaymentRequiredResponse {
                     payment_required: true,
                     tool_name: "trending_notes".into(),
@@ -694,16 +718,19 @@ impl NostrIntelServer {
 
         // Execute
         let timeframe_str = params.timeframe.as_deref().unwrap_or("24h");
-        let since_secs = parse_timeframe(timeframe_str)
-            .map_err(|e| format!("Invalid timeframe: {e}"))?;
+        let since_secs =
+            parse_timeframe(timeframe_str).map_err(|e| format!("Invalid timeframe: {e}"))?;
         let now = chrono::Utc::now().timestamp() as u64;
         let since = Timestamp::from(now.saturating_sub(since_secs));
 
         let limit = params.limit.unwrap_or(20).min(50) as usize;
 
         // Fetch recent notes
-        let notes = self.nostr_client.fetch_recent_notes(since, 200)
-            .await.map_err(|e| format!("Failed to fetch notes: {e}"))?;
+        let notes = self
+            .nostr_client
+            .fetch_recent_notes(since, 200)
+            .await
+            .map_err(|e| format!("Failed to fetch notes: {e}"))?;
 
         if notes.is_empty() {
             let response = TrendingNotesResponse {
@@ -725,7 +752,8 @@ impl NostrIntelServer {
         let reposts = reposts.map_err(|e| format!("Failed to fetch reposts: {e}"))?;
 
         // Count reactions per note
-        let mut reaction_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut reaction_counts: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
         for r in &reactions {
             for tag in r.tags.iter() {
                 let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
@@ -738,7 +766,8 @@ impl NostrIntelServer {
         }
 
         // Count reposts per note
-        let mut repost_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut repost_counts: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
         for r in &reposts {
             for tag in r.tags.iter() {
                 let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
@@ -751,14 +780,17 @@ impl NostrIntelServer {
         }
 
         // Score and sort notes
-        let mut scored_notes: Vec<(u64, &Event)> = notes.iter().map(|note| {
-            let id_hex = note.id.to_hex();
-            let r_count = reaction_counts.get(&id_hex).copied().unwrap_or(0);
-            let rp_count = repost_counts.get(&id_hex).copied().unwrap_or(0);
-            // Score: reactions * 1 + reposts * 3
-            let score = r_count as u64 + rp_count as u64 * 3;
-            (score, note)
-        }).collect();
+        let mut scored_notes: Vec<(u64, &Event)> = notes
+            .iter()
+            .map(|note| {
+                let id_hex = note.id.to_hex();
+                let r_count = reaction_counts.get(&id_hex).copied().unwrap_or(0);
+                let rp_count = repost_counts.get(&id_hex).copied().unwrap_or(0);
+                // Score: reactions * 1 + reposts * 3
+                let score = r_count as u64 + rp_count as u64 * 3;
+                (score, note)
+            })
+            .collect();
 
         scored_notes.sort_by(|a, b| b.0.cmp(&a.0));
         scored_notes.truncate(limit);
@@ -806,7 +838,10 @@ impl NostrIntelServer {
 
         // Payment gate
         if let Some(ref hash) = params.payment_hash {
-            let gw = self.nwc_gateway.as_ref().ok_or("Payment system not configured")?;
+            let gw = self
+                .nwc_gateway
+                .as_ref()
+                .ok_or("Payment system not configured")?;
             let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
             if !paid {
                 return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
@@ -817,12 +852,20 @@ impl NostrIntelServer {
                 .check_and_increment("stdio", self.config.free_tier.calls_per_day)
                 .await;
             if !under_limit {
-                let gw = self.nwc_gateway.as_ref()
+                let gw = self
+                    .nwc_gateway
+                    .as_ref()
                     .ok_or("Free tier exhausted and payment system not configured")?;
                 let amount = self.calculate_follower_graph_price(depth);
                 let inv = gw
-                    .create_invoice("get_follower_graph", amount, "nostr-intel: get_follower_graph", self.config.payment.invoice_expiry_seconds)
-                    .await.map_err(|e| e.to_string())?;
+                    .create_invoice(
+                        "get_follower_graph",
+                        amount,
+                        "nostr-intel: get_follower_graph",
+                        self.config.payment.invoice_expiry_seconds,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
                 let resp = PaymentRequiredResponse {
                     payment_required: true,
                     tool_name: "get_follower_graph".into(),
@@ -841,8 +884,11 @@ impl NostrIntelServer {
         let pubkey_hex = pubkey.to_hex();
 
         // Fetch the target's contact list (who they follow)
-        let contact_list = self.nostr_client.fetch_contact_list(&pubkey)
-            .await.map_err(|e| format!("Failed to fetch contact list: {e}"))?;
+        let contact_list = self
+            .nostr_client
+            .fetch_contact_list(&pubkey)
+            .await
+            .map_err(|e| format!("Failed to fetch contact list: {e}"))?;
 
         let mut following: Vec<PubkeySummary> = Vec::new();
         let mut following_set: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -878,7 +924,9 @@ impl NostrIntelServer {
             .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey_hex.clone())
             .limit(100);
 
-        let follower_events = self.nostr_client.client()
+        let follower_events = self
+            .nostr_client
+            .client()
             .fetch_events(follower_filter, std::time::Duration::from_secs(15))
             .await
             .map_err(|e| format!("Failed to fetch followers: {e}"))?;
@@ -903,7 +951,8 @@ impl NostrIntelServer {
         let followers_count = followers.len() as u32;
 
         // Compute mutual follows
-        let mutual_follows: Vec<PubkeySummary> = followers.iter()
+        let mutual_follows: Vec<PubkeySummary> = followers
+            .iter()
             .filter(|f| following_set.contains(&f.pubkey))
             .cloned()
             .collect();
@@ -932,7 +981,10 @@ impl NostrIntelServer {
     ) -> Result<String, String> {
         // Payment gate
         if let Some(ref hash) = params.payment_hash {
-            let gw = self.nwc_gateway.as_ref().ok_or("Payment system not configured")?;
+            let gw = self
+                .nwc_gateway
+                .as_ref()
+                .ok_or("Payment system not configured")?;
             let paid = gw.verify_payment(hash).await.map_err(|e| e.to_string())?;
             if !paid {
                 return Err("Payment not confirmed. Invoice may be unpaid or expired.".into());
@@ -943,12 +995,20 @@ impl NostrIntelServer {
                 .check_and_increment("stdio", self.config.free_tier.calls_per_day)
                 .await;
             if !under_limit {
-                let gw = self.nwc_gateway.as_ref()
+                let gw = self
+                    .nwc_gateway
+                    .as_ref()
                     .ok_or("Free tier exhausted and payment system not configured")?;
                 let amount = self.config.pricing.zap_analytics;
                 let inv = gw
-                    .create_invoice("zap_analytics", amount, "nostr-intel: zap_analytics", self.config.payment.invoice_expiry_seconds)
-                    .await.map_err(|e| e.to_string())?;
+                    .create_invoice(
+                        "zap_analytics",
+                        amount,
+                        "nostr-intel: zap_analytics",
+                        self.config.payment.invoice_expiry_seconds,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
                 let resp = PaymentRequiredResponse {
                     payment_required: true,
                     tool_name: "zap_analytics".into(),
@@ -966,18 +1026,24 @@ impl NostrIntelServer {
             .map_err(|e| format!("Invalid pubkey: {e}"))?;
 
         let timeframe_str = params.timeframe.as_deref().unwrap_or("30d");
-        let since_secs = parse_timeframe(timeframe_str)
-            .map_err(|e| format!("Invalid timeframe: {e}"))?;
+        let since_secs =
+            parse_timeframe(timeframe_str).map_err(|e| format!("Invalid timeframe: {e}"))?;
         let now = chrono::Utc::now().timestamp() as u64;
         let since = Timestamp::from(now.saturating_sub(since_secs));
 
-        let zap_receipts = self.nostr_client.fetch_zap_receipts(&pubkey, Some(since))
-            .await.map_err(|e| format!("Failed to fetch zap receipts: {e}"))?;
+        let zap_receipts = self
+            .nostr_client
+            .fetch_zap_receipts(&pubkey, Some(since))
+            .await
+            .map_err(|e| format!("Failed to fetch zap receipts: {e}"))?;
 
         let mut total_sats: u64 = 0;
-        let mut zapper_totals: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-        let mut note_totals: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-        let mut daily_totals: std::collections::BTreeMap<String, (u32, u64)> = std::collections::BTreeMap::new();
+        let mut zapper_totals: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        let mut note_totals: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        let mut daily_totals: std::collections::BTreeMap<String, (u32, u64)> =
+            std::collections::BTreeMap::new();
 
         for event in &zap_receipts {
             // Parse amount from the zap request description tag or bolt11
@@ -1037,7 +1103,9 @@ impl NostrIntelServer {
         // Top zapped notes
         let mut note_vec: Vec<(String, u64)> = note_totals.into_iter().collect();
         note_vec.sort_by(|a, b| b.1.cmp(&a.1));
-        let top_zapped_notes: Vec<ZappedNote> = note_vec.into_iter().take(10)
+        let top_zapped_notes: Vec<ZappedNote> = note_vec
+            .into_iter()
+            .take(10)
             .map(|(note_id, sats)| ZappedNote {
                 note_id,
                 content_preview: String::new(),
@@ -1046,7 +1114,8 @@ impl NostrIntelServer {
             .collect();
 
         // Zaps over time
-        let zaps_over_time: Vec<ZapPeriod> = daily_totals.into_iter()
+        let zaps_over_time: Vec<ZapPeriod> = daily_totals
+            .into_iter()
             .map(|(date, (count, sats))| ZapPeriod { date, count, sats })
             .collect();
 
@@ -1128,16 +1197,22 @@ impl NostrIntelServer {
 fn parse_timeframe(tf: &str) -> Result<u64, String> {
     let tf = tf.trim().to_lowercase();
     if let Some(hours) = tf.strip_suffix('h') {
-        let h: u64 = hours.parse().map_err(|_| format!("Invalid hours: {hours}"))?;
+        let h: u64 = hours
+            .parse()
+            .map_err(|_| format!("Invalid hours: {hours}"))?;
         Ok(h * 3600)
     } else if let Some(days) = tf.strip_suffix('d') {
         let d: u64 = days.parse().map_err(|_| format!("Invalid days: {days}"))?;
         Ok(d * 86400)
     } else if let Some(years) = tf.strip_suffix('y') {
-        let y: u64 = years.parse().map_err(|_| format!("Invalid years: {years}"))?;
+        let y: u64 = years
+            .parse()
+            .map_err(|_| format!("Invalid years: {years}"))?;
         Ok(y * 365 * 86400)
     } else {
-        Err(format!("Unknown timeframe format: {tf}. Use '1h', '24h', '7d', '30d', etc."))
+        Err(format!(
+            "Unknown timeframe format: {tf}. Use '1h', '24h', '7d', '30d', etc."
+        ))
     }
 }
 

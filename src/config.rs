@@ -71,11 +71,10 @@ impl Config {
     pub fn load() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
 
-        let content = std::fs::read_to_string("config.toml")
-            .context("Failed to read config.toml")?;
+        let content =
+            std::fs::read_to_string("config.toml").context("Failed to read config.toml")?;
 
-        let mut config: Config =
-            toml::from_str(&content).context("Failed to parse config.toml")?;
+        let mut config: Config = toml::from_str(&content).context("Failed to parse config.toml")?;
 
         // Override nwc_url from env var if set
         if let Ok(nwc_url) = std::env::var("NWC_URL") {

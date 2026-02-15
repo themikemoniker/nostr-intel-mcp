@@ -26,10 +26,7 @@ impl NostrClient {
     }
 
     pub async fn get_metadata(&self, pubkey: &PublicKey) -> anyhow::Result<Option<Metadata>> {
-        let filter = Filter::new()
-            .kind(Kind::Metadata)
-            .author(*pubkey)
-            .limit(1);
+        let filter = Filter::new().kind(Kind::Metadata).author(*pubkey).limit(1);
 
         let timeout = Duration::from_secs(10);
         let events = self.client.fetch_events(filter, timeout).await?;
@@ -76,10 +73,7 @@ impl NostrClient {
 
     /// Fetch kind:10002 (NIP-65 relay list metadata) for a pubkey
     pub async fn fetch_relay_list(&self, pubkey: &PublicKey) -> anyhow::Result<Vec<Event>> {
-        let filter = Filter::new()
-            .kind(Kind::RelayList)
-            .author(*pubkey)
-            .limit(1);
+        let filter = Filter::new().kind(Kind::RelayList).author(*pubkey).limit(1);
 
         let timeout = Duration::from_secs(10);
         let events = self.client.fetch_events(filter, timeout).await?;
@@ -138,9 +132,7 @@ impl NostrClient {
         if event_ids.is_empty() {
             return Ok(vec![]);
         }
-        let mut filter = Filter::new()
-            .kind(Kind::Repost)
-            .events(event_ids.to_vec());
+        let mut filter = Filter::new().kind(Kind::Repost).events(event_ids.to_vec());
         if let Some(since) = since {
             filter = filter.since(since);
         }
@@ -155,9 +147,7 @@ impl NostrClient {
         pubkey: &PublicKey,
         since: Option<Timestamp>,
     ) -> anyhow::Result<Vec<Event>> {
-        let mut filter = Filter::new()
-            .kind(Kind::ZapReceipt)
-            .pubkey(*pubkey);
+        let mut filter = Filter::new().kind(Kind::ZapReceipt).pubkey(*pubkey);
         if let Some(since) = since {
             filter = filter.since(since);
         }
@@ -172,13 +162,16 @@ impl NostrClient {
         since: Timestamp,
         limit: usize,
     ) -> anyhow::Result<Vec<Event>> {
-        let filter = Filter::new()
-            .kind(Kind::TextNote)
-            .since(since)
-            .limit(limit);
+        let filter = Filter::new().kind(Kind::TextNote).since(since).limit(limit);
         let timeout = Duration::from_secs(15);
         let events = self.client.fetch_events(filter, timeout).await?;
         Ok(events.into_iter().collect())
+    }
+
+    /// Reconnect to all relays in the pool. Called by background health check.
+    pub async fn reconnect(&self) {
+        tracing::debug!("Reconnecting to relay pool");
+        self.client.connect().await;
     }
 
     pub fn parse_pubkey(input: &str) -> anyhow::Result<PublicKey> {

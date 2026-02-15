@@ -8,8 +8,8 @@ mod tools;
 
 use std::sync::Arc;
 
-use rmcp::ServiceExt;
 use rmcp::transport::stdio;
+use rmcp::ServiceExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -31,7 +31,10 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Starting nostr-intel-mcp server");
 
     let config = config::Config::load()?;
-    tracing::info!("Configuration loaded (transport={})", config.server.transport);
+    tracing::info!(
+        "Configuration loaded (transport={})",
+        config.server.transport
+    );
 
     match config.server.transport.as_str() {
         "http" => run_http(config).await,
@@ -39,8 +42,44 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
+/// Spawn background maintenance tasks (cache cleanup, relay health).
+fn spawn_background_tasks(shared: &Arc<server::SharedState>) {
+    // Periodic cache cleanup (every 30 minutes)
+    let cache = Arc::clone(&shared.cache);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30 * 60));
+        interval.tick().await; // skip first immediate tick
+        loop {
+            interval.tick().await;
+            match cache.cleanup_expired().await {
+                Ok(()) => tracing::debug!("Cache cleanup completed"),
+                Err(e) => tracing::warn!("Cache cleanup failed: {e}"),
+            }
+        }
+    });
+
+    // Periodic relay reconnect (every 5 minutes)
+    let client = Arc::clone(&shared.nostr_client);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5 * 60));
+        interval.tick().await; // skip first immediate tick
+        loop {
+            interval.tick().await;
+            client.reconnect().await;
+            tracing::debug!("Relay pool reconnect completed");
+        }
+    });
+
+    tracing::info!("Background tasks started (cache cleanup: 30m, relay reconnect: 5m)");
+}
+
 async fn run_stdio(config: config::Config) -> anyhow::Result<()> {
     let server = server::NostrIntelServer::new(config).await?;
+
+    // Spawn background tasks using shared state
+    let shared = Arc::new(server.shared_state());
+    spawn_background_tasks(&shared);
+
     tracing::info!("Server initialized, serving MCP over stdio");
 
     let service = server.serve(stdio()).await?;
@@ -63,6 +102,9 @@ async fn run_http(config: config::Config) -> anyhow::Result<()> {
     let init_server = server::NostrIntelServer::new(config).await?;
     let shared = Arc::new(init_server.shared_state());
     drop(init_server);
+
+    // Spawn background tasks
+    spawn_background_tasks(&shared);
 
     // Build the MCP StreamableHttp service
     let shared_for_factory = Arc::clone(&shared);
@@ -87,13 +129,13 @@ async fn run_http(config: config::Config) -> anyhow::Result<()> {
 
         app = app.route(
             "/l402/challenge/{tool_name}",
-            get(move |axum::extract::Path(tool_name): axum::extract::Path<String>| {
-                let l402_mgr = Arc::clone(&l402_mgr);
-                let shared = Arc::clone(&shared_for_l402);
-                async move {
-                    l402_challenge_handler(tool_name, l402_mgr, shared).await
-                }
-            }),
+            get(
+                move |axum::extract::Path(tool_name): axum::extract::Path<String>| {
+                    let l402_mgr = Arc::clone(&l402_mgr);
+                    let shared = Arc::clone(&shared_for_l402);
+                    async move { l402_challenge_handler(tool_name, l402_mgr, shared).await }
+                },
+            ),
         );
         tracing::info!("L402 challenge endpoint enabled at /l402/challenge/{{tool_name}}");
     }
@@ -117,7 +159,11 @@ async fn l402_challenge_handler(
     let gw = match shared.nwc_gateway.as_ref() {
         Some(gw) => gw,
         None => {
-            return (StatusCode::SERVICE_UNAVAILABLE, "NWC gateway not configured").into_response();
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "NWC gateway not configured",
+            )
+                .into_response();
         }
     };
 
@@ -146,20 +192,14 @@ async fn l402_challenge_handler(
         Ok(inv) => inv,
         Err(e) => {
             tracing::error!("Failed to create invoice for L402 challenge: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Invoice creation failed")
-                .into_response();
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Invoice creation failed").into_response();
         }
     };
 
-    let expires = chrono::Utc::now().timestamp() as u64
-        + shared.config.payment.invoice_expiry_seconds;
+    let expires =
+        chrono::Utc::now().timestamp() as u64 + shared.config.payment.invoice_expiry_seconds;
 
-    let challenge = l402_mgr.create_challenge(
-        &inv.invoice,
-        &inv.payment_hash,
-        &tool_name,
-        expires,
-    );
+    let challenge = l402_mgr.create_challenge(&inv.invoice, &inv.payment_hash, &tool_name, expires);
 
     let body = serde_json::json!({
         "tool": tool_name,

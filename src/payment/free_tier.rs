@@ -23,9 +23,10 @@ impl FreeTierLimiter {
         let today = current_day();
         let mut counters = self.counters.write().await;
 
-        let counter = counters
-            .entry(client_id.to_string())
-            .or_insert(DayCounter { count: 0, day: today });
+        let counter = counters.entry(client_id.to_string()).or_insert(DayCounter {
+            count: 0,
+            day: today,
+        });
 
         // Reset if day changed
         if counter.day != today {

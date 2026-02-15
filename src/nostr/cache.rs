@@ -80,11 +80,9 @@ impl Cache {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_profiles_expires ON profiles(expires_at)",
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_profiles_expires ON profiles(expires_at)")
+            .execute(&self.pool)
+            .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS relay_info (
@@ -103,11 +101,9 @@ impl Cache {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_relay_info_expires ON relay_info(expires_at)",
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_relay_info_expires ON relay_info(expires_at)")
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

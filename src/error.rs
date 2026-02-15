@@ -28,6 +28,15 @@ pub enum NostrIntelError {
 
     #[error("NWC error: {0}")]
     Nwc(String),
+
+    #[error("Payment error: {0}")]
+    Payment(String),
+
+    #[error("L402 error: {0}")]
+    L402(String),
+
+    #[error("Relay connection error: {0}")]
+    RelayConnection(String),
 }
 
 impl From<NostrIntelError> for String {

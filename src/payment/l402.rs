@@ -47,12 +47,7 @@ impl L402Manager {
     }
 
     /// Create a signed L402 token for a given payment.
-    pub fn create_token(
-        &self,
-        payment_hash: &str,
-        tool: &str,
-        expires: u64,
-    ) -> String {
+    pub fn create_token(&self, payment_hash: &str, tool: &str, expires: u64) -> String {
         let caveats = L402Caveats {
             tool: tool.to_string(),
             expires,
@@ -117,9 +112,7 @@ impl L402Manager {
         expires: u64,
     ) -> String {
         let token = self.create_token(payment_hash, tool, expires);
-        format!(
-            "L402 invoice=\"{invoice}\", token=\"{token}\""
-        )
+        format!("L402 invoice=\"{invoice}\", token=\"{token}\"")
     }
 
     /// Parse an Authorization header: "L402 <token>:<preimage>"
@@ -196,13 +189,15 @@ mod tests {
         let hash_hex = hex::encode(hash);
 
         assert!(L402Manager::verify_preimage(&hash_hex, &preimage_hex));
-        assert!(!L402Manager::verify_preimage(&hash_hex, &hex::encode([0x02_u8; 32])));
+        assert!(!L402Manager::verify_preimage(
+            &hash_hex,
+            &hex::encode([0x02_u8; 32])
+        ));
     }
 
     #[test]
     fn test_parse_authorization() {
-        let (token, preimage) =
-            L402Manager::parse_authorization("L402 dG9rZW4=:abc123").unwrap();
+        let (token, preimage) = L402Manager::parse_authorization("L402 dG9rZW4=:abc123").unwrap();
         assert_eq!(token, "dG9rZW4=");
         assert_eq!(preimage, "abc123");
 
