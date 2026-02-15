@@ -89,10 +89,13 @@ async fn run_stdio(config: config::Config) -> anyhow::Result<()> {
 }
 
 async fn run_http(config: config::Config) -> anyhow::Result<()> {
+    use axum::response::Html;
     use axum::routing::get;
     use rmcp::transport::streamable_http_server::{
         session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
     };
+
+    const LANDING_HTML: &str = include_str!("../static/index.html");
 
     let http_port = config.server.http_port;
     let l402_enabled = config.payment.enable_l402;
@@ -116,6 +119,7 @@ async fn run_http(config: config::Config) -> anyhow::Result<()> {
 
     // Build axum router
     let mut app = axum::Router::new()
+        .route("/", get(|| async { Html(LANDING_HTML) }))
         .route("/health", get(|| async { "ok" }))
         .nest_service("/mcp", mcp_service);
 

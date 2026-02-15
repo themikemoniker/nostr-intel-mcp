@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nostr-intel-mcp</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #7b68ee;
+    --accent-dim: #5847c2;
+    --orange: #f0883e;
+    --green: #3fb950;
+    --blue: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  code, .mono { font-family: 'SF Mono', 'Fira Code', 'Fira Mono', Menlo, Consolas, monospace; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  /* Hero */
+  .hero {
+    padding: 80px 0 48px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero h1 {
+    font-size: 2.4rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .hero h1 .accent { color: var(--accent); }
+  .hero .tagline {
+    font-size: 1.2rem;
+    color: var(--text-muted);
+    margin-top: 8px;
+  }
+  .hero .desc {
+    margin-top: 20px;
+    color: var(--text-muted);
+    max-width: 640px;
+    margin-left: auto;
+    margin-right: auto;
+    font-size: 0.95rem;
+  }
+  .badges {
+    margin-top: 24px;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .badge.free { background: #1a3a2a; color: var(--green); }
+  .badge.paid { background: #3a2a1a; color: var(--orange); }
+  .badge.proto { background: #1a2a3a; color: var(--blue); }
+
+  /* Sections */
+  section { padding: 48px 0; border-bottom: 1px solid var(--border); }
+  section:last-child { border-bottom: none; }
+  h2 {
+    font-size: 1.5rem;
+    margin-bottom: 24px;
+    font-weight: 600;
+  }
+  h3 {
+    font-size: 1.1rem;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+
+  /* Tools */
+  .tool-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 12px;
+  }
+  .tool-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .tool-name {
+    font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .tool-cost {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+  .tool-cost.free { background: #1a3a2a; color: var(--green); }
+  .tool-cost.paid { background: #3a2a1a; color: var(--orange); }
+  .tool-desc {
+    color: var(--text-muted);
+    margin-top: 8px;
+    font-size: 0.9rem;
+  }
+  .tool-params {
+    margin-top: 12px;
+    font-size: 0.85rem;
+  }
+  .tool-params code {
+    background: var(--bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+  }
+  .param-required { color: var(--text); }
+  .param-optional { color: var(--text-muted); }
+
+  /* Endpoints */
+  .endpoint-grid {
+    display: grid;
+    gap: 12px;
+  }
+  .endpoint {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .endpoint-method {
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-weight: 700;
+    font-size: 0.8rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: #1a3a2a;
+    color: var(--green);
+    flex-shrink: 0;
+  }
+  .endpoint-path {
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.95rem;
+    color: var(--text);
+  }
+  .endpoint-desc {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    flex-basis: 100%;
+    margin-top: 4px;
+  }
+
+  /* Code blocks */
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin-top: 12px;
+  }
+
+  /* Getting started */
+  .setup-block { margin-bottom: 24px; }
+
+  /* Footer */
+  footer {
+    padding: 32px 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+  footer a { color: var(--text-muted); }
+  footer a:hover { color: var(--text); }
+
+  @media (max-width: 640px) {
+    .hero { padding: 48px 0 32px; }
+    .hero h1 { font-size: 1.8rem; }
+    section { padding: 32px 0; }
+    .endpoint { flex-direction: column; gap: 8px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Hero -->
+  <div class="hero">
+    <h1><span class="accent">nostr-intel</span>-mcp</h1>
+    <p class="tagline">Nostr network intelligence for AI agents</p>
+    <p class="desc">
+      An MCP server that gives AI agents real-time access to the Nostr network &mdash;
+      decode entities, look up profiles, check relays, search events, analyze zaps,
+      and explore the social graph. Free tier included, paid tools via Lightning.
+    </p>
+    <div class="badges">
+      <span class="badge free">5 free tools</span>
+      <span class="badge paid">5 paid tools &middot; Lightning</span>
+      <span class="badge proto">MCP Streamable HTTP</span>
+    </div>
+  </div>
+
+  <!-- Tools Reference -->
+  <section>
+    <h2>Tools</h2>
+
+    <h3 style="color: var(--green); margin-bottom: 16px;">Free</h3>
+
+    <div class="tool-card">
+      <div class="tool-header">
+        <span class="tool-name">decode_nostr_uri</span>
+        <span class="tool-cost free">free</span>
+      </div>
+      <p class="tool-desc">Decode any Nostr bech32 entity (npub, note, nprofile, nevent, naddr) into its components.</p>
+      <div class="tool-params">
+        <span class="param-required"><code>uri</code> &mdash; bech32 string to decode</span>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-header">
+        <span class="tool-name">resolve_nip05</span>
+        <span class="tool-cost free">free</span>
+      </div>
+      <p class="tool-desc">Resolve a NIP-05 identifier (user@domain.com) to a Nostr pubkey and relay list.</p>
+      <div class="tool-params">
+        <span class="param-required"><code>nip05</code> &mdash; identifier, e.g. "jack@cash.app"</span>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-header">
+        <span class="tool-name">get_profile</span>
+        <span class="tool-cost free">free</span>
+      </div>
+      <p class="tool-desc">Fetch Nostr profile metadata (kind:0). Accepts hex pubkey, npub, NIP-05, or display name (fuzzy search).</p>
+      <div class="tool-params">
+        <span class="param-required"><code>pubkey</code> &mdash; hex, npub, NIP-05, or display name</span>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-header">
+        <span class="tool-name">check_relay</span>
+        <span class="tool-cost free">free</span>
+      </div>
+      <p class="tool-desc">Check a relay's online status, latency, and NIP-11 info document.</p>
+      <div class="tool-params">
+        <span class="param-required"><code>relay_url</code> &mdash; WebSocket URL, e.g. "wss://relay.damus.io"</span>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-header">
+        <span class="tool-name">search_profiles</span>
+        <span class="tool-cost free">free</span>
+      </div>
+      <p class="tool-desc">Search Nostr profiles by name or keyword via Primal's cache. Returns metadata and follower counts.</p>
+      <div class="tool-params">
+        <span class="param-required"><code>query</code> &mdash; name or keyword</span><br>
+        <span class="param-optional"><code>limit?</code> &mdash; max results (default: 5, max: 20)</span>
+      </div>
+    </div>
+
+    <h3 style="color: var(--orange); margin-top: 32px; margin-bottom: 16px;">Paid <span style="font-weight: 400; font-size: 0.85rem; color: var(--text-muted);">&mdash; 10 free calls/day, then Lightning</span></h3>
+
+    <div class="tool-card">
+      <div class="tool-header">
+        <span class="tool-name">search_events</span>
+        <span class="tool-cost paid">10-50 sats</span>
+      </div>
+      <p class="tool-desc">Search Nostr events across multiple relays with filters. Supports NIP-50 full-text search.</p>
+      <div class="tool-params">
+        <span class="param-optional"><code>authors?</code> &mdash; pubkey filter (hex or npub)</span><br>
+        <span class="param-optional"><code>kinds?</code> &mdash; event kind filter (e.g. 1 for text notes)</span><br>
+        <span class="param-optional"><code>search?</code> &mdash; full-text search query (NIP-50)</span><br>
+        <span class="param-optional"><code>since_hours?</code> &mdash; only events from last N hours</span><br>
+        <span class="param-optional"><code>limit?</code> &mdash; max results (default: 20, max: 100)</span><br>
+        <span class="param-optional"><code>payment_hash?</code> &mdash; Lightning payment proof</span>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-header">
+        <span class="tool-name">relay_discovery</span>
+        <span class="tool-cost paid">20 sats</span>
+      </div>
+      <p class="tool-desc">Discover relays used by a pubkey via NIP-65 relay list metadata. Returns read/write relay lists.</p>
+      <div class="tool-params">
+        <span class="param-required"><code>pubkey</code> &mdash; hex or npub</span><br>
+        <span class="param-optional"><code>payment_hash?</code> &mdash; Lightning payment proof</span>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-header">
+        <span class="tool-name">trending_notes</span>
+        <span class="tool-cost paid">20 sats</span>
+      </div>
+      <p class="tool-desc">Find trending Nostr notes by reactions, reposts, and zaps.</p>
+      <div class="tool-params">
+        <span class="param-optional"><code>timeframe?</code> &mdash; "1h", "24h", "7d" (default: "24h")</span><br>
+        <span class="param-optional"><code>limit?</code> &mdash; max results (default: 20, max: 50)</span><br>
+        <span class="param-optional"><code>payment_hash?</code> &mdash; Lightning payment proof</span>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-header">
+        <span class="tool-name">get_follower_graph</span>
+        <span class="tool-cost paid">50-100 sats</span>
+      </div>
+      <p class="tool-desc">Get the follower graph: following, followers, and mutual follows.</p>
+      <div class="tool-params">
+        <span class="param-required"><code>pubkey</code> &mdash; hex or npub</span><br>
+        <span class="param-optional"><code>depth?</code> &mdash; 1 (default, 50 sats) or 2 (100 sats)</span><br>
+        <span class="param-optional"><code>payment_hash?</code> &mdash; Lightning payment proof</span>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-header">
+        <span class="tool-name">zap_analytics</span>
+        <span class="tool-cost paid">50 sats</span>
+      </div>
+      <p class="tool-desc">Analyze zap (Lightning tip) activity: totals, top zappers, top zapped notes, timeline.</p>
+      <div class="tool-params">
+        <span class="param-required"><code>pubkey</code> &mdash; hex or npub</span><br>
+        <span class="param-optional"><code>timeframe?</code> &mdash; "7d", "30d" (default), "90d", "1y"</span><br>
+        <span class="param-optional"><code>payment_hash?</code> &mdash; Lightning payment proof</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Endpoints -->
+  <section>
+    <h2>Endpoints</h2>
+    <div class="endpoint-grid">
+      <div class="endpoint">
+        <span class="endpoint-method">GET</span>
+        <span class="endpoint-path">/</span>
+        <span class="endpoint-desc">This page</span>
+      </div>
+      <div class="endpoint">
+        <span class="endpoint-method">POST</span>
+        <span class="endpoint-path">/mcp</span>
+        <span class="endpoint-desc">MCP protocol (Streamable HTTP). Connect AI agents here.</span>
+      </div>
+      <div class="endpoint">
+        <span class="endpoint-method">GET</span>
+        <span class="endpoint-path">/health</span>
+        <span class="endpoint-desc">Health check &mdash; returns "ok"</span>
+      </div>
+      <div class="endpoint">
+        <span class="endpoint-method">GET</span>
+        <span class="endpoint-path">/l402/challenge/{tool_name}</span>
+        <span class="endpoint-desc">L402 payment challenge &mdash; returns Lightning invoice for a paid tool</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Getting Started -->
+  <section>
+    <h2>Getting Started</h2>
+
+    <div class="setup-block">
+      <h3>Claude Desktop (remote)</h3>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 8px;">
+        Add to <code>claude_desktop_config.json</code>:
+      </p>
+      <pre><code>{
+  "mcpServers": {
+    "nostr-intel": {
+      "type": "streamable-http",
+      "url": "https://nostr-intel-mcp.fly.dev/mcp"
+    }
+  }
+}</code></pre>
+    </div>
+
+    <div class="setup-block">
+      <h3>Claude Code (remote)</h3>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 8px;">
+        Add to <code>.mcp.json</code> or run:
+      </p>
+      <pre><code>claude mcp add nostr-intel \
+  --transport http \
+  --url https://nostr-intel-mcp.fly.dev/mcp</code></pre>
+    </div>
+
+    <div class="setup-block">
+      <h3>Local (stdio)</h3>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 8px;">
+        Build from source and add to <code>claude_desktop_config.json</code>:
+      </p>
+      <pre><code>{
+  "mcpServers": {
+    "nostr-intel": {
+      "command": "/path/to/nostr-intel-mcp",
+      "args": []
+    }
+  }
+}</code></pre>
+    </div>
+  </section>
+
+  <footer>
+    <a href="https://github.com/ArcadeLabsInc/nostr-intel-mcp">github.com/ArcadeLabsInc/nostr-intel-mcp</a>
+  </footer>
+
+</div>
+</body>
+</html>
