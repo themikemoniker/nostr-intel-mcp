@@ -1,0 +1,42 @@
+[package]
+name = "nostr-intel-mcp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# MCP SDK
+rmcp = { version = "0.15", features = ["server", "transport-io", "macros"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Nostr protocol
+nostr-sdk = "0.44"
+nwc = "0.44"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# schemars is re-exported by rmcp — use rmcp::schemars
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Configuration
+toml = "0.8"
+dotenvy = "0.15"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+url = "2"

@@ -1,0 +1,28 @@
+[server]
+name = "nostr-intel-mcp"
+version = "0.1.0"
+
+[relays]
+default = [
+  "wss://relay.damus.io",
+  "wss://relay.nostr.band",
+  "wss://nos.lol",
+  "wss://relay.snort.social",
+  "wss://purplepag.es",
+  "wss://relay.primal.net",
+]
+
+[cache]
+database_path = "nostr_cache.db"
+profile_ttl_seconds = 3600
+relay_info_ttl_seconds = 3600
+
+[free_tier]
+calls_per_day = 10
+
+[pricing]
+search_events_base = 10  # sats
+
+[payment]
+nwc_url = ""  # override with NWC_URL env var
+invoice_expiry_seconds = 600
